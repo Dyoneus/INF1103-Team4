@@ -21,3 +21,14 @@ def get_menu_choice() -> str:
             return choice
 
         print ("invalid choice. Please enter 1 or 0.")
+
+def get_report_text() -> str | None:
+    """Collect report description, or return none if cancelled"""
+    print("\nDescribe what you observed, then press Enter to submit.")
+    print("Press Ctrl+C to cancel.")
+
+    try:
+        return input("> ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print("\nReport entry cancelled.")
+        return None
