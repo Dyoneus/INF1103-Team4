@@ -66,3 +66,20 @@ def validate_report_text(text: str, max_chars: int) -> list[str]:
         errors.append("DESCRIPTION_TOO_LONG")
 
     return errors
+
+
+
+"""For running io_manager.py easily/debugging"""
+if __name__ == "__main__":
+    display_menu()
+    choice = get_menu_choice()
+
+    if choice == "1":
+        report_text = get_report_text()
+
+        if report_text is not None:
+            print("\nReport collected:")
+            print(report_text)
+
+    elif choice == "0":
+        print("Exiting SafeReport.")
