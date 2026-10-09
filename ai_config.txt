@@ -1,0 +1,3 @@
+Run "pip install groq" -> 
+Configure the terminal environment/set API key by typing ->
+$env:GROQ_API_KEY = "APIKEY"   
