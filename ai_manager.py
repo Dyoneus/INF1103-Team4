@@ -22,21 +22,18 @@ EXTRACTED_FIELDS = [
 ]
 
 
-class AIManagerError(Exception):
-    """Raised when incident report analysis fails."""
-
-
 def get_client():
     """Create a Groq client using the configured API key."""
     api_key = os.environ.get("GROQ_API_KEY")
 
     if not api_key:
-        raise AIManagerError(
+        raise RuntimeError(
             "GROQ_API_KEY is not configured. "
             "Set the environment variable before running the program."
         )
 
     return Groq(api_key=api_key)
+
 
 def validate_response(text):
     """Validate extracted incident information."""
@@ -77,6 +74,7 @@ def validate_response(text):
         result[field] = value.strip() if isinstance(value, str) else None
 
     return result
+
 
 def build_prompt(incident_report):
     """Build the prompt for extracting incident information."""
@@ -126,12 +124,12 @@ def encode_image(photo_path):
     path = Path(photo_path)
 
     if not path.is_file():
-        raise AIManagerError(f"Photo file not found: {path}")
+        raise FileNotFoundError(f"Photo file not found: {path}")
 
     mime_type, _ = mimetypes.guess_type(path.name)
 
     if mime_type not in ("image/jpeg", "image/png"):
-        raise AIManagerError(
+        raise ValueError(
             f"Unsupported photo type: {path}. Use JPEG or PNG."
         )
 
@@ -237,7 +235,7 @@ def analyze_incident(incident_report, photo_paths=None):
         MAX_ATTEMPTS,
     )
 
-    raise AIManagerError(
+    raise RuntimeError(
         f"Incident analysis failed after {MAX_ATTEMPTS} attempts."
     ) from last_error
 
@@ -279,7 +277,7 @@ def main():
         if key != "photos"
     }
 
-    # Send photos only when explicit consent was recorded.
+    # Send photos only when explicit consent was recorded as True.
     photo_paths = []
 
     if case_details.get("consent_for_image_use") is True:
@@ -324,4 +322,3 @@ if __name__ == "__main__":
     except Exception as exc:
         logger.exception("Incident analysis failed.")
         print(f"Error: {exc}")
-
