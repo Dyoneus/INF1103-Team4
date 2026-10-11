@@ -13,20 +13,27 @@ def load_reports():
         return []
 
     except json.JSONDecodeError:
-        return []
+        return None
 
 
 def save_report(report):
     reports = load_reports()
 
+    if reports is None:
+        return False
+
     reports.append(report)
 
     with open(DATA_FILE, "w") as file:
         json.dump(reports, file, indent=4)
+    return True
 
 
 def filter_by_status(status):
     reports = load_reports()
+
+    if reports is None:
+        return None
 
     filtered_reports = []
 
