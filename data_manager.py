@@ -86,3 +86,57 @@ def filter_by_status(status):
 
 
 
+def update_report(reference_id, updated_data):
+    if not isinstance(reference_id, str) or not reference_id.strip():
+        return False
+
+    if not isinstance(updated_data, dict):
+        return False
+
+    if "reference_id" in updated_data:
+        return False
+
+    reports = load_reports()
+
+    if reports is None:
+        return False
+
+    for report in reports:
+        if isinstance(report, dict):
+            if report.get("reference_id") == reference_id:
+                report.update(updated_data)
+
+                temp_file = None
+
+                try:
+                    json_data = json.dumps(reports, indent=4, ensure_ascii=False)
+
+                    with tempfile.NamedTemporaryFile(
+                        mode="w",
+                        encoding="utf-8",
+                        dir=".",
+                        suffix=".tmp",
+                        delete=False
+                    ) as file:
+                        temp_file = file.name
+                        file.write(json_data)
+
+                    os.replace(temp_file, DATA_FILE)
+                    return True
+
+                except (OSError, TypeError, ValueError):
+                    return False
+
+                finally:
+                    if temp_file is not None:
+                        try:
+                            os.remove(temp_file)
+                        except OSError:
+                            pass
+
+    return False
+
+
+
+def get_failed_ai_reports():
+    return filter_by_status("AI_FAILED")
