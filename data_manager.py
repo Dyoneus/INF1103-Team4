@@ -1,4 +1,6 @@
 import json
+import os
+import tempfile
 
 DATA_FILE = "reports.json"
 
@@ -31,13 +33,40 @@ def save_report(report):
 
     reports.append(report)
 
+    temp_file = None
+
     try:
-        with open(DATA_FILE, "w", encoding="utf-8") as file:
-            json.dump(reports, file, indent=4, ensure_ascii=False)
+        # Convert to JSON first to check if the data is valid
+        json_data = json.dumps(reports, indent=4, ensure_ascii=False)
+
+        # Save to a temporary file first
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=".",
+            suffix=".tmp",
+            delete=False
+        ) as file:
+            temp_file = file.name
+            file.write(json_data)
+
+        # Replace the original file only after saving succeeds
+        os.replace(temp_file, DATA_FILE)
+
         return True
 
-    except(OSError,TypeError, ValueError):
+    except (OSError, TypeError, ValueError):
         return False
+
+    finally:
+        if temp_file is not None:
+            try:
+                os.remove(temp_file)
+            except FileNotFoundError:
+                pass
+            except OSError:
+                pass
+
 
 
 def filter_by_status(status):
