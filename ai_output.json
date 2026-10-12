@@ -1,7 +1,18 @@
-{
-  "description": "There are three workers chatting outside the lathe machince, but no one attending to it",
-  "location": "Tampanies",
-  "date": "1900-12-12",
-  "time": "12:00",
-  "photo_description": "A worker wearing a red hard hat, safety glasses, and a blue work jacket with orange gloves is standing next to a large green industrial machine. The worker is reaching towards a red circular component on the machine. The background shows an industrial setting with metal structures and lighting."
-}
+[
+    {
+        "issue_clarity": "CLEAR",
+        "location_quality": "ADEQUATE",
+        "date_quality": "EXACT",
+        "time_quality": "EXACT",
+        "safety_category": "SLIP_TRIP_FALL",
+        "reference_id": "20261009-203903-85a5d3"
+    },
+    {
+        "issue_clarity": "CLEAR",
+        "location_quality": "ADEQUATE",
+        "date_quality": "EXACT",
+        "time_quality": "EXACT",
+        "safety_category": "FIRE",
+        "reference_id": "20261009-204605-79b550"
+    }
+]
