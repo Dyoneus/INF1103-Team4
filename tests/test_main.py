@@ -83,6 +83,10 @@ def test_report_needs_clarification(monkeypatch):
         main.io_manager, "display_clarification_questions",
         lambda codes: displayed.update({"codes": codes})
     )
+    monkeypatch.setattr(
+        main.io_manager, "collect_clarifications",
+        lambda report: None
+    )
 
     #run the workflow
     main.process_new_report()
@@ -163,6 +167,10 @@ def test_other_readiness_statuses(
         main.io_manager, "display_clarification_questions",
         lambda codes: displayed.update({"codes": codes})
     )
+    monkeypatch.setattr(
+        main.io_manager, "collect_clarifications",
+        lambda report: None
+    )
 
     # Simulate original report saving
     monkeypatch.setattr(
@@ -204,6 +212,60 @@ def test_other_readiness_statuses(
 
     assert displayed["assessment"]["status"] == expected_status
     assert displayed["codes"] == expected_codes
+
+
+def test_assess_report_asks_for_clarification_immediately(monkeypatch):
+    report = {
+        "reference_id": "TEST-CASE",
+        "case_details": {
+            "description": "Sparks from an electrical cable.",
+            "workplace_location": "Warehouse",
+            "incident_datetime": "2026-10-13T15:00",
+            "photos": [],
+            "consent_for_image_use": False,
+        },
+    }
+
+    first_ai_fields = {
+        "issue_clarity": "CLEAR",
+        "location_quality": "VAGUE",
+        "date_quality": "EXACT",
+        "time_quality": "EXACT",
+        "safety_category": "ELECTRICAL",
+    }
+    second_ai_fields = {
+        "issue_clarity": "CLEAR",
+        "location_quality": "ADEQUATE",
+        "date_quality": "EXACT",
+        "time_quality": "EXACT",
+        "safety_category": "ELECTRICAL",
+    }
+
+    ai_calls = {"count": 0}
+
+    def fake_analyze(client, incident_data, photo_paths):
+        ai_calls["count"] += 1
+        return first_ai_fields if ai_calls["count"] == 1 else second_ai_fields
+
+    monkeypatch.setattr(main.ai_manager, "get_client", lambda: object())
+    monkeypatch.setattr(main.ai_manager, "analyze_incident", fake_analyze)
+    monkeypatch.setattr(main.data_manager, "save_report", lambda *args: True)
+    monkeypatch.setattr(main.data_manager, "save_clarifications", lambda *args: True)
+    monkeypatch.setattr(main.io_manager, "display_assessment_result", lambda assessment: None)
+
+    collected = {}
+
+    def fake_collect_clarifications(report_data):
+        collected["codes"] = report_data["assessment"]["clarification_codes"]
+        return {"workplace_location": "Block 30, level 3"}
+
+    monkeypatch.setattr(main.io_manager, "collect_clarifications", fake_collect_clarifications)
+
+    main.assess_report("TEST-CASE", report)
+
+    assert collected["codes"] == ["CLARIFY_LOCATION"]
+    assert report["case_details"]["workplace_location"] == "Block 30, level 3"
+    assert ai_calls["count"] == 2
 
 
 def test_save_failure(monkeypatch):

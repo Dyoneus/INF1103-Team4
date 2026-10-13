@@ -6,7 +6,7 @@ SafeReport is a terminal application for recording workplace safety reports. It 
 
 - Python 3.12 or later for running locally
 - Docker Desktop (or another Docker Engine) for running in a container
-- A Groq API key only when using the separate AI analysis script
+- A Groq API key for AI assessments (reports can still be saved without it)
 
 ## Run locally
 
@@ -14,7 +14,7 @@ SafeReport is a terminal application for recording workplace safety reports. It 
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
-python io_manager.py
+python main.py
 ```
 
 On macOS or Linux, activate the virtual environment with:
@@ -25,13 +25,22 @@ source .venv/bin/activate
 
 Submitted reports and copied photos are saved under `reports/`. That directory is local application data and is excluded from Git.
 
+Both `python main.py` and `python io_manager.py` open the same menu:
+
+- **1. Create a new safety report** saves the report and assesses its readiness.
+- **2. Retry a failed assessment** lists failed reports. Select a number or reference ID to retry and update that same report.
+- **3. Clarify and reassess a saved report** lists incomplete reports and reports needing clarification. Answer the requested questions to update and reassess the same record.
+- **0. Exit** closes the application. In report selection, 0 cancels instead.
+
+Clarification answers are saved together before reassessment. Ctrl+C during the questions cancels without saving changes. If AI then fails, the corrections remain saved and option 2 can retry them. Reference IDs, reporter details and attached photos are preserved.
+
 ## Configure the AI API
 
-The interactive report-entry application does not call the AI service. `ai_manager.py` is a separate script that analyses JSON reports in `reports/`.
+The interactive application calls AI after saving a new report, retrying a failed assessment, or saving clarification answers. A missing API key leaves the report saved with status `AI_FAILED`, ready to retry after configuration.
 
 For Docker, copy `.env.example` to `.env` and replace `your_groq_api_key_here` with your Groq API key. Docker reads this file when passed `--env-file .env`. Do not commit `.env`.
 
-For local use, `.env` is not loaded automatically. Set the key in the current shell before running `python ai_manager.py`:
+For local use, `.env` is not loaded automatically. Set the key in the current shell before running `python main.py`:
 
 ```powershell
 $env:GROQ_API_KEY = "your_actual_groq_api_key"
@@ -43,7 +52,7 @@ On macOS or Linux:
 export GROQ_API_KEY="your_actual_groq_api_key"
 ```
 
-AI results are written to `ai_output.json` by default. Set `AI_OUTPUT_PATH` to choose a different destination.
+The interactive application stores AI results and readiness assessments in each report JSON file. The optional batch script, `python ai_manager.py`, writes separate results to `ai_output.json` by default; `AI_OUTPUT_PATH` changes that destination. Batch output does not update saved readiness assessments; use menu option 2 for retries.
 
 ## Run with Docker
 
@@ -55,6 +64,8 @@ Run these commands from the repository root (the folder containing `docker-compo
 docker compose build
 docker compose run --rm safereport
 ```
+
+To enable AI assessment, configure `.env` as described above and start with `docker compose run --rm --env-file .env safereport`.
 
 The app is interactive. Choose **1. Create a new safety report**, complete the prompts, and let it finish saving before exiting. A report JSON file is created only after a report has been completed and submitted.
 
@@ -82,6 +93,12 @@ This AI step is separate from entering a report and requires a valid API key. It
 Use the Compose commands above if you want files to appear in the project folders. If you run the image directly with `docker run` and mount a **named volume** at `/app/reports`, Docker keeps the files in its own managed storage; they will persist, but they will not appear in the project’s local `reports/` folder.
 
 ## Tests
+
+Run the complete test suite (AI calls are mocked):
+
+```sh
+python -m pytest -q
+```
 
 Run the AI manager tests locally:
 
