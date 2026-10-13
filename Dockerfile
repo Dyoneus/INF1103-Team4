@@ -22,4 +22,4 @@ USER app
 # Keep submitted reports/photos and AI results outside the container lifecycle.
 VOLUME ["/app/reports", "/data"]
 
-CMD ["python", "io_manager.py"]
+CMD ["python", "main.py"]
