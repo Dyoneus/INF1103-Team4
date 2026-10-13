@@ -1,58 +1,53 @@
 import json
 import os
 import tempfile
+from pathlib import Path
 
-DATA_FILE = "reports.json"
+REPORTS_DIR = Path("reports")
 
 
 def load_reports():
-    try:
-        with open(DATA_FILE, "r", encoding="utf-8") as file:
-            reports = json.load(file)
-
-            if not isinstance(reports, list):
-                return None
-            
-            return reports
-
-    except FileNotFoundError:
+    if not REPORTS_DIR.exists():
         return []
 
-    except (json.JSONDecodeError, OSError):
+    if not REPORTS_DIR.is_dir():
+        return None
+
+    reports = []
+    
+    try:
+        for reports_path in sorted(REPORTS_DIR.glob("*.json")):
+            with reports_path.open("r", encoding="utf-8") as file:
+                report = json.load(file)
+
+            if not isinstance(report, dict):
+                return None
+
+            reports.append(report)
+            
+        return reports
+
+    except (OSError, json.JSONDecodeError, UnicodeError):
         return None
 
 
-def save_report(report):
-    reports = load_reports()
-
-    if reports is None:
-        return False
-
-    if not isinstance(report, dict):
-        return False
-
-    reports.append(report)
-
+def _write_report(report_path, report):
     temp_file = None
 
     try:
-        # Convert to JSON first to check if the data is valid
-        json_data = json.dumps(reports, indent=4, ensure_ascii=False)
+        json_data = json.dumps(report, indent=4, ensure_ascii=False)
 
-        # Save to a temporary file first
         with tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
-            dir=".",
+            dir=REPORTS_DIR,
             suffix=".tmp",
             delete=False
         ) as file:
             temp_file = file.name
             file.write(json_data)
 
-        # Replace the original file only after saving succeeds
-        os.replace(temp_file, DATA_FILE)
-
+        os.replace(temp_file, report_path)
         return True
 
     except (OSError, TypeError, ValueError):
@@ -62,11 +57,73 @@ def save_report(report):
         if temp_file is not None:
             try:
                 os.remove(temp_file)
-            except FileNotFoundError:
-                pass
             except OSError:
                 pass
 
+
+def update_report(reference_id, updated_data):
+    if not isinstance(reference_id, str) or not reference_id.strip():
+        return False
+
+    if "/" in reference_id or "\\" in reference_id:
+        return False
+
+    if reference_id in (".", ".."):
+        return False
+
+    if not isinstance(updated_data, dict):
+        return False
+
+    if "reference_id" in updated_data:
+        return False
+
+    # Only allow AI and Logic results to be updated.
+    if not set(updated_data).issubset({"ai_result", "assessment"}):
+        return False
+    
+    report_path = REPORTS_DIR / (reference_id + ".json")
+
+    try:
+        if not report_path.is_file():
+            return False
+
+        with report_path.open("r", encoding="utf-8") as file:
+            report = json.load(file)
+
+        if not isinstance(report, dict):
+            return False
+
+        if report.get("reference_id") != reference_id:
+            return False
+
+        report.update(updated_data)
+
+        return _write_report(report_path, report)
+
+    except (OSError, json.JSONDecodeError, UnicodeError):
+        return False
+
+
+
+def save_report(reference_id, ai_result, assessment):
+    if not isinstance(ai_result, dict):
+        return False
+
+    if not isinstance(assessment, dict):
+        return False
+
+    if not isinstance(assessment.get("status"), str):
+        return False
+
+    if not isinstance(assessment.get("clarification_codes"), list):
+        return False
+
+    updated_data = {
+        "ai_result": ai_result,
+        "assessment": assessment
+    }
+
+    return update_report(reference_id, updated_data)
 
 
 def filter_by_status(status):
@@ -78,64 +135,13 @@ def filter_by_status(status):
     filtered_reports = []
 
     for report in reports:
-        if isinstance(report, dict):
-            if report.get("status") == status:
+        assessment = report.get("assessment", {})
+
+        if isinstance(assessment, dict):
+            if assessment.get("status") == status:
                 filtered_reports.append(report)
 
     return filtered_reports
-
-
-
-def update_report(reference_id, updated_data):
-    if not isinstance(reference_id, str) or not reference_id.strip():
-        return False
-
-    if not isinstance(updated_data, dict):
-        return False
-
-    if "reference_id" in updated_data:
-        return False
-
-    reports = load_reports()
-
-    if reports is None:
-        return False
-
-    for report in reports:
-        if isinstance(report, dict):
-            if report.get("reference_id") == reference_id:
-                report.update(updated_data)
-
-                temp_file = None
-
-                try:
-                    json_data = json.dumps(reports, indent=4, ensure_ascii=False)
-
-                    with tempfile.NamedTemporaryFile(
-                        mode="w",
-                        encoding="utf-8",
-                        dir=".",
-                        suffix=".tmp",
-                        delete=False
-                    ) as file:
-                        temp_file = file.name
-                        file.write(json_data)
-
-                    os.replace(temp_file, DATA_FILE)
-                    return True
-
-                except (OSError, TypeError, ValueError):
-                    return False
-
-                finally:
-                    if temp_file is not None:
-                        try:
-                            os.remove(temp_file)
-                        except OSError:
-                            pass
-
-    return False
-
 
 
 def get_failed_ai_reports():
