@@ -3,13 +3,19 @@ import json
 import logging
 import mimetypes
 import os
+import random
+import re
+import sys
 import time
 from pathlib import Path
 
+import groq
 from groq import Groq
 
 MODEL = "qwen/qwen3.8-27b"
-MAX_ATTEMPTS = 3
+MAX_ATTEMPTS = 3 # total tries per report (first try + retries)
+REQUEST_TIMEOUT = 30  # seconds# seconds per API call
+MAX_BACKOFF = 30 #cap on any single wait between attempts
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +45,11 @@ ALLOWED_VALUES = {
     ],
 }
 
+RETRYABLE_API_ERRORS = (
+    groq.APIConnectionError,   # includes APITimeoutError
+    groq.RateLimitError,
+    groq.InternalServerError,  # 5xx
+)
 
 def get_client():
     """Create a Groq client using the configured API key."""
@@ -50,11 +61,19 @@ def get_client():
             "Set the environment variable before running the program."
         )
 
-    return Groq(api_key=api_key)
+    return Groq(api_key=api_key, timeout=REQUEST_TIMEOUT, max_retries=0)
 
+def _strip_code_fences(text):
+    """Remove ```json ... ``` wrappers some models add despite instructions."""
+    text = text.strip()
+    match = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL)
+    return match.group(1) if match else text
 
 def validate_response(text):
     """Validate the AI response and return the required structured fields."""
+    if not isinstance(text, str):
+        raise ValueError("AI response must be a string.")
+
     try:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
@@ -63,10 +82,23 @@ def validate_response(text):
     if not isinstance(data, dict):
         raise ValueError("AI response must be a JSON object.")
 
+    # Reject extra keys too, so the AI output matches the required schema exactly.
+    unexpected = [field for field in data if field not in EXTRACTED_FIELDS]
+    if unexpected:
+        raise ValueError(
+            f"AI response contains unexpected fields: {unexpected}"
+        )
+
+    missing = [f for f in EXTRACTED_FIELDS if f not in data]
+    if missing:
+        raise ValueError(
+            f"AI response is missing required fields: {missing}"
+        )
+
     validated = {}
 
     for field in EXTRACTED_FIELDS:
-        value = data.get(field)
+        value = data[field]
 
         if not isinstance(value, str):
             raise ValueError(
@@ -94,7 +126,13 @@ def build_prompt(incident_report):
         indent=2,
     )
 
+    allowed_section = "\n\n".join(
+        f"{field}:\n" + "\n".join(f"- {v}" for v in ALLOWED_VALUES[field])
+        for field in EXTRACTED_FIELDS
+    )
+
     return f"""
+
 You are analysing a user's free-text safety observation.
 
 Your task is to assess the clarity and completeness of the information
@@ -105,35 +143,9 @@ Return ONLY one valid JSON object containing exactly these fields:
 
 Use only the following allowed values:
 
-issue_clarity:
-- CLEAR
-- UNCLEAR
+{allowed_section}
 
-location_quality:
-- ADEQUATE
-- VAGUE
-- MISSING
-
-date_quality:
-- EXACT
-- APPROXIMATE
-- MISSING
-
-time_quality:
-- EXACT
-- APPROXIMATE
-- MISSING
-
-safety_category:
-- FIRE
-- ELECTRICAL
-- SLIP_TRIP_FALL
-- STRUCTURAL
-- EQUIPMENT
-- CHEMICAL
-- ENVIRONMENTAL
-- OTHER
-- UNCLEAR
+Rules:
 
 Rules:
 1. Analyse the user's written safety observation and the information
@@ -182,34 +194,75 @@ def encode_image(photo_path):
 
     return f"data:{mime_type};base64,{encoded}"
 
+def collect_photo_paths(case_details, project_dir):
+    """Return photo paths from a report, only if image consent was given."""
+    if case_details.get("consent_for_image_use") is not True:
+        return []
 
-def analyze_incident(incident_report, photo_paths=None):
-    """Analyse an incident report and return structured JSON fields."""
-    client = get_client()
-    prompt = build_prompt(incident_report)
+    photos = case_details.get("photos", [])
+    if not isinstance(photos, list):
+        return []
 
-    messages = [
-        {
-            "role": "user",
-            "content": [
-                {
-                    "type": "text",
-                    "text": prompt,
-                }
-            ],
-        }
-    ]
+    paths = []
 
-    if photo_paths:
-        for photo_path in photo_paths:
-            image_url = encode_image(photo_path)
-            messages[0]["content"].append(
+    for photo in photos:
+        if isinstance(photo, str):
+            photo_value = photo
+        elif isinstance(photo, dict):
+            photo_value = (
+                photo.get("path")
+                or photo.get("file_path")
+                or photo.get("filename")
+            )
+        else:
+            photo_value = None
+
+        if not photo_value:
+            continue
+
+        resolved = (project_dir / photo_value).resolve()
+
+        if project_dir not in resolved.parents:
+            logger.warning("Skipping photo outside project dir: %s", photo_value)
+            continue
+
+        paths.append(str(resolved))
+
+    return paths
+
+def _retry_delay(attempt, exc):
+    """Seconds to wait before the next attempt (honours Retry-After)."""
+    retry_after = None
+
+    response = getattr(exc, "response", None)
+    if response is not None:
+        try:
+            retry_after = float(response.headers.get("retry-after"))
+        except (TypeError, ValueError):
+            retry_after = None
+
+    backoff = 2 ** (attempt - 1) + random.uniform(0, 0.5)
+    return min(max(backoff, retry_after or 0), MAX_BACKOFF)
+
+def analyze_incident(client, incident_report, photo_paths=None):
+    """Analyse an incident report and return the validated fields.
+
+    Raises RuntimeError if every attempt fails or a non-retryable error occurs.
+    """
+    content = [{"type": "text", "text": build_prompt(incident_report)}]
+
+    for photo_path in photo_paths or []:
+        try:
+            content.append(
                 {
                     "type": "image_url",
-                    "image_url": {"url": image_url},
+                    "image_url": {"url": encode_image(photo_path)},
                 }
             )
+        except (OSError, ValueError) as exc:
+            logger.warning("Skipping unusable photo %s: %s", photo_path, exc)
 
+    messages = [{"role": "user", "content": content}]
     last_error = None
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
@@ -221,16 +274,18 @@ def analyze_incident(incident_report, photo_paths=None):
                 response_format={"type": "json_object"},
             )
 
-            content = response.choices[0].message.content
+            if not response.choices:
+                raise ValueError("AI returned no choices.")
 
-            if not content:
+            text = response.choices[0].message.content
+
+            if not text:
                 raise ValueError("AI returned an empty response.")
 
-            return validate_response(content)
+            return validate_response(text)
 
-        except Exception as exc:
+        except (ValueError, *RETRYABLE_API_ERRORS) as exc:
             last_error = exc
-
             logger.warning(
                 "Incident analysis attempt %s/%s failed: %s",
                 attempt,
@@ -239,14 +294,69 @@ def analyze_incident(incident_report, photo_paths=None):
             )
 
             if attempt < MAX_ATTEMPTS:
-                time.sleep(2 ** (attempt - 1))
+                time.sleep(_retry_delay(attempt, exc))
+
+        except groq.APIStatusError as exc:
+            raise RuntimeError(
+                f"Non-retryable API error (HTTP {exc.status_code}): {exc}"
+            ) from exc
 
     raise RuntimeError(
-        f"Incident analysis failed after {MAX_ATTEMPTS} attempts."
+        f"Incident analysis failed after {MAX_ATTEMPTS} attempts: {last_error}"
     ) from last_error
 
+def make_result(reference_id, fields=None, error=None):
+    """Every report yields the same keys, success or failure."""
+    result = {
+        "reference_id": reference_id,
+        "status": "error" if error else "success",
+    }
+
+    for field in EXTRACTED_FIELDS:
+        result[field] = fields[field] if fields and not error else None
+
+    result["error"] = str(error) if error else None
+    return result
+
+
+def process_report(client, report_path, project_dir, client_error=None):
+    """Process one report file. Never raises; always returns a result."""
+    reference_id = report_path.stem
+
+    try:
+        with report_path.open("r", encoding="utf-8") as report_file:
+            report = json.load(report_file)
+
+        if not isinstance(report, dict):
+            raise ValueError("Report must be a JSON object.")
+
+        reference_id = str(report.get("reference_id", reference_id))
+
+        case_details = report.get("case_details", {})
+        if not isinstance(case_details, dict):
+            raise ValueError("Report case_details must be a JSON object.")
+
+        if client_error is not None:
+            raise client_error
+
+        incident_data = {
+            key: value
+            for key, value in case_details.items()
+            if key != "photos"
+        }
+
+        photo_paths = collect_photo_paths(case_details, project_dir)
+        print(f"Analyzing {report_path.name} with {len(photo_paths)} photo(s)...")
+
+        fields = analyze_incident(client, incident_data, photo_paths)
+        return make_result(reference_id, fields=fields)
+
+    except Exception as exc:
+        logger.error("Failed to process report %s: %s", report_path.name, exc)
+        return make_result(reference_id, error=exc)
+
 def main():
-    """Load and analyse every report, then save all AI results."""
+    """Analyse every report and save all results to ai_output.json."""
     project_dir = Path(__file__).resolve().parent
     reports_dir = project_dir / "reports"
     output_path = project_dir / "ai_output.json"
@@ -254,88 +364,28 @@ def main():
     report_files = sorted(reports_dir.glob("*.json"))
 
     if not report_files:
-        raise FileNotFoundError(
-            f"No report JSON files found in {reports_dir}"
-        )
+        raise FileNotFoundError(f"No report JSON files found in {reports_dir}")
 
-    results = []
+    client_error = None
+    try:
+        client = get_client()
+    except RuntimeError as exc:
+        # Keep producing one consistent error result per report if setup fails.
+        client = None
+        client_error = exc
+        logger.error("Failed to initialize AI client: %s", exc)
 
-    for report_path in report_files:
-        print(f"\nLoading report: {report_path.name}")
+    results = [
+        process_report(client, report_path, project_dir, client_error)
+        for report_path in report_files
+    ]
 
-        try:
-            with report_path.open("r", encoding="utf-8") as report_file:
-                report = json.load(report_file)
-
-            case_details = report.get("case_details", {})
-
-            if not isinstance(case_details, dict):
-                raise ValueError(
-                    "Report case_details must be a JSON object."
-                )
-
-            incident_data = {
-                key: value
-                for key, value in case_details.items()
-                if key != "photos"
-            }
-
-            photo_paths = []
-
-            if case_details.get("consent_for_image_use") is True:
-                photos = case_details.get("photos", [])
-
-                if isinstance(photos, list):
-                    for photo in photos:
-                        if isinstance(photo, str):
-                            photo_paths.append(
-                                str(project_dir / photo)
-                            )
-
-                        elif isinstance(photo, dict):
-                            photo_value = (
-                                photo.get("path")
-                                or photo.get("file_path")
-                                or photo.get("filename")
-                            )
-
-                            if photo_value:
-                                photo_paths.append(
-                                    str(project_dir / photo_value)
-                                )
-
-            print(
-                f"Analyzing incident with {len(photo_paths)} photo(s)..."
-            )
-
-            result = analyze_incident(
-                incident_data,
-                photo_paths=photo_paths,
-            )
-
-            result["reference_id"] = report.get(
-                "reference_id",
-                report_path.stem,
-            )
-
-            results.append(result)
-            print(f"Successfully analysed: {report_path.name}")
-
-        except Exception as exc:
-            logger.exception(
-                "Failed to process report: %s",
-                report_path.name,
-            )
-
-            results.append({
-                "reference_id": report_path.stem,
-                "error": str(exc),
-            })
-
-    with output_path.open("w", encoding="utf-8") as output_file:
+    tmp_path = output_path.with_suffix(".json.tmp")
+    with tmp_path.open("w", encoding="utf-8") as output_file:
         json.dump(results, output_file, ensure_ascii=False, indent=4)
+    tmp_path.replace(output_path)
 
-    successful = sum("error" not in result for result in results)
+    successful = sum(r["status"] == "success" for r in results)
     failed = len(results) - successful
 
     print(f"\nAI results saved to: {output_path}")
@@ -343,9 +393,18 @@ def main():
     print(f"Successful: {successful}")
     print(f"Failed: {failed}")
 
+    return 0 if failed == 0 else 1
+
+
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+    )
+
     try:
-        main()
+        sys.exit(main())
     except Exception as exc:
-        logger.exception("Incident analysis failed.")
+        logger.error("Incident analysis failed: %s", exc)
         print(f"Error: {exc}")
+        sys.exit(2)

@@ -22,7 +22,8 @@ def validate_ai_output(ai_output):
     if not isinstance(ai_output, dict):
         return False
 
-    if "error" in ai_output:
+    # Success results include "error": None; only actual failures are invalid.
+    if ai_output.get("status") == "error" or ai_output.get("error") is not None:
         return False
 
     for field, allowed_values in ALLOWED_VALUES.items():
