@@ -413,6 +413,59 @@ def display_assessment_result(assessment: dict) -> None:
     else:
         print("Assessment result unavailable.")
 
+
+def display_clarification_questions(codes: list[str]) -> None:
+    """display clarification questsions based on the given codes"""
+
+    questions = {
+        "CLARIFY_OBSERVATION": "Please describe what you observed in more detail.",
+        "ADD_LOCATION": "Where did you observe this?",
+        "CLARIFY_LOCATION": "Can you provide a more specific location?",
+        "ADD_DATE": "What date did this happen?",
+        "ADD_TIME": "Approximately what time did this happen?"
+    }
+
+    if not codes:
+        return
+
+    print("\nPlease clarify the following:")
+
+    for code in codes:
+        if code in questions:
+            print("- " + questions[code])
+        else:
+            print("- Clarification question unavailable.")
+
+
+def display_processing_error(error_code: str) -> None:
+    """display an error message based on the error code."""
+
+    error_messages = {
+        "QUOTA_EXHAUSTED": "AI usage limit reached. Please try again later.",
+        "RATE_LIMITED": "Too many AI requests. Please try again later.",
+        "TIMEOUT": "The AI service took too long to respond.",
+        "INVALID_JSON": "The AI returned an invalid response.",
+        "INVALID_SCHEMA": "The AI response is missing required information.",
+        "CONFIG_MISSING": "The AI API key has not been configured.",
+        "SAVE_FAILED": "The report could not be saved.",
+        "LOAD_FAILED": "Saved reports could not be loaded."
+    }
+
+    print("\nSafeReport Error")
+    print("-" * 48)
+
+    message = error_messages.get(
+        error_code, "An unexpected error occurred."
+    )
+
+    print(message)
+
+    if error_code in (
+        "QUOTA_EXHAUSTED", "RATE_LIMITED", "TIMEOUT",
+        "INVALID_JSON", "INVALID_SCHEMA", "CONFIG_MISSING"
+    ):
+        print("The report was not assessed.")
+
 """For running io_manager.py easily/debugging"""
 def run() -> None:
     """Show the menu and handle report creation until the user exits."""
