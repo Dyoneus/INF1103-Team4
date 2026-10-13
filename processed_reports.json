@@ -1,27 +1,40 @@
 [
     {
-        "reference_id": "20261009-203903-85a5d3",
-        "status": "READY_FOR_REVIEW",
-        "reason": "The report contains sufficient information for review."
+        "status": "READY_FOR_REVIEW"
     },
     {
-        "reference_id": "20261009-204605-79b550",
-        "status": "READY_FOR_REVIEW",
-        "reason": "The report contains sufficient information for review."
+        "status": "READY_FOR_REVIEW"
     },
     {
-        "reference_id": "20261013-114200-test01",
         "status": "INCOMPLETE",
-        "reason": "The safety issue is unclear or the location is missing."
+        "clarification_codes": [
+            "CLARIFY_OBSERVATION",
+            "ADD_LOCATION",
+            "ADD_DATE",
+            "ADD_TIME"
+        ]
     },
     {
-        "reference_id": "20261013-114200-test02",
         "status": "NEEDS_CLARIFICATION",
-        "reason": "The location, date, time or safety category needs clarification."
+        "clarification_codes": [
+            "CLARIFY_LOCATION",
+            "ADD_DATE",
+            "ADD_TIME"
+        ]
     },
     {
-        "reference_id": "20261009-204605-test03",
-        "status": "READY_FOR_REVIEW",
-        "reason": "The report contains sufficient information for review."
+        "status": "READY_FOR_REVIEW"
+    },
+    {
+        "status": "NEEDS_CLARIFICATION",
+        "clarification_codes": [
+            "ADD_DATE"
+        ]
+    },
+    {
+        "status": "NEEDS_CLARIFICATION",
+        "clarification_codes": [
+            "ADD_TIME"
+        ]
     }
 ]
