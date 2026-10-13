@@ -12,6 +12,8 @@ from pathlib import Path
 import groq
 from groq import Groq
 
+import io_manager
+
 MODEL = "qwen/qwen3.8-27b"
 MAX_ATTEMPTS = 3 # total tries per report (first try + retries)
 REQUEST_TIMEOUT = 30  # seconds# seconds per API call
@@ -348,7 +350,9 @@ def process_report(client, report_path, project_dir, client_error=None):
         }
 
         photo_paths = collect_photo_paths(case_details, project_dir)
-        print(f"Analyzing {report_path.name} with {len(photo_paths)} photo(s)...")
+        io_manager.display_report_analysis_started(
+            report_path.name, len(photo_paths)
+        )
 
         fields = analyze_incident(client, incident_data, photo_paths)
         return make_result(reference_id, fields=fields)
@@ -395,10 +399,12 @@ def main():
     successful = sum(r["status"] == "success" for r in results)
     failed = len(results) - successful
 
-    print(f"\nAI results saved to: {output_path}")
-    print(f"Total reports: {len(results)}")
-    print(f"Successful: {successful}")
-    print(f"Failed: {failed}")
+    io_manager.display_analysis_summary(
+        output_path=str(output_path),
+        total=len(results),
+        successful=successful,
+        failed=failed,
+    )
 
     return 0 if failed == 0 else 1
 
@@ -413,5 +419,5 @@ if __name__ == "__main__":
         sys.exit(main())
     except Exception as exc:
         logger.error("Incident analysis failed: %s", exc)
-        print(f"Error: {exc}")
+        io_manager.display_analysis_error(str(exc))
         sys.exit(2)
