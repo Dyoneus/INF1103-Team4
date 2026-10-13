@@ -1,0 +1,17 @@
+# Python environments and generated files
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Local secrets and temporary files
+.env
+.env.*
+!.env.example
+*.tmp
+
+# User and generated application data
+reports/
+reports.json
+ai_output.json
+processed_reports.json

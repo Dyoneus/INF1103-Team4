@@ -355,11 +355,16 @@ def process_report(client, report_path, project_dir, client_error=None):
         logger.error("Failed to process report %s: %s", report_path.name, exc)
         return make_result(reference_id, error=exc)
 
+def get_output_path(project_dir):
+    """Use persistent storage when configured; otherwise keep the local default."""
+    configured_path = os.environ.get("AI_OUTPUT_PATH")
+    return Path(configured_path) if configured_path else project_dir / "ai_output.json"
+
 def main():
     """Analyse every report and save all results to ai_output.json."""
     project_dir = Path(__file__).resolve().parent
     reports_dir = project_dir / "reports"
-    output_path = project_dir / "ai_output.json"
+    output_path = get_output_path(project_dir)
 
     report_files = sorted(reports_dir.glob("*.json"))
 

@@ -105,6 +105,24 @@ class AIManagerTests(unittest.TestCase):
             ),
         )
 
+    def test_ai_output_path_can_be_configured_for_persistent_storage(self):
+        project_dir = Path("project")
+
+        with patch.dict(
+            ai_manager.os.environ,
+            {"AI_OUTPUT_PATH": "/data/ai_output.json"},
+        ):
+            output_path = ai_manager.get_output_path(project_dir)
+
+        self.assertEqual(output_path, Path("/data/ai_output.json"))
+
+    def test_ai_output_path_defaults_to_project_directory(self):
+        with patch.dict(ai_manager.os.environ):
+            ai_manager.os.environ.pop("AI_OUTPUT_PATH", None)
+            output_path = ai_manager.get_output_path(Path("project"))
+
+        self.assertEqual(output_path, Path("project") / "ai_output.json")
+
     def test_analyze_incident_stops_after_max_attempts(self):
         class FakeCompletions:
             calls = 0

@@ -1,0 +1,13 @@
+.git/
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.env
+.env.*
+reports/
+reports.json
+ai_output.json
+processed_reports.json
+*.tmp
