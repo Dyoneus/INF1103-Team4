@@ -80,16 +80,10 @@ def ask(prompt: str) -> str:
     return input(prompt).strip()
 
 
-def ask_until_valid(prompt: str, validate, optional: bool = False) -> str | None:
-    """Keep asking until validate(value) returns no error codes.
-
-    If optional is True, a blank answer returns None.
-    """
+def ask_until_valid(prompt: str, validate) -> str:
+    """Keep asking until validate(value) returns no error codes."""
     while True:
         value = ask(prompt)
-
-        if optional and not value:
-            return None
 
         errors = validate(value)
         if not errors:
@@ -438,12 +432,6 @@ def review_report_before_submission(report: dict | None) -> dict | None:
             report["reporter"] = collect_contact_details()
 
         display_report_summary(report)
-
-        try:
-            if not ask_yes_no("Would you like to make any further changes?"):
-                return report
-        except (EOFError, KeyboardInterrupt, OSError):
-            return report
 
 
 def collect_report() -> dict | None:

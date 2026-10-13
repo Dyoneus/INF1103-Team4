@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-REPORTS_DIR = Path("reports")
+import constants
 
 
 def save_report(report: dict) -> Path:
@@ -29,8 +29,8 @@ def save_report(report: dict) -> Path:
         "reporter": report["reporter"],
     }
 
-    REPORTS_DIR.mkdir(exist_ok=True)
-    report_path = REPORTS_DIR / f"{reference_id}.json"
+    constants.REPORTS_DIR.mkdir(exist_ok=True)
+    report_path = constants.REPORTS_DIR / f"{reference_id}.json"
     with report_path.open("w", encoding="utf-8") as file:
         json.dump(record, file, indent=2, ensure_ascii=False)
 
@@ -42,7 +42,7 @@ def _copy_photos(photo_paths: list[str], reference_id: str) -> list[str]:
     if not photo_paths:
         return []
 
-    photo_dir = REPORTS_DIR / "photos" / reference_id
+    photo_dir = constants.REPORTS_DIR / "photos" / reference_id
     photo_dir.mkdir(parents=True, exist_ok=True)
 
     saved = []

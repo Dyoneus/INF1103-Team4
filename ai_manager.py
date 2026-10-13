@@ -12,38 +12,15 @@ from pathlib import Path
 import groq
 from groq import Groq
 
+import constants
+from constants import ALLOWED_VALUES, EXTRACTED_FIELDS
+
 MODEL = "qwen/qwen3.8-27b"
 MAX_ATTEMPTS = 3 # total tries per report (first try + retries)
 REQUEST_TIMEOUT = 30  # seconds# seconds per API call
 MAX_BACKOFF = 30 #cap on any single wait between attempts
 
 logger = logging.getLogger(__name__)
-
-EXTRACTED_FIELDS = [
-    "issue_clarity",
-    "location_quality",
-    "date_quality",
-    "time_quality",
-    "safety_category",
-]
-
-ALLOWED_VALUES = {
-    "issue_clarity": ["CLEAR", "UNCLEAR"],
-    "location_quality": ["ADEQUATE", "VAGUE", "MISSING"],
-    "date_quality": ["EXACT", "APPROXIMATE", "MISSING"],
-    "time_quality": ["EXACT", "APPROXIMATE", "MISSING"],
-    "safety_category": [
-        "FIRE",
-        "ELECTRICAL",
-        "SLIP_TRIP_FALL",
-        "STRUCTURAL",
-        "EQUIPMENT",
-        "CHEMICAL",
-        "ENVIRONMENTAL",
-        "OTHER",
-        "UNCLEAR",
-    ],
-}
 
 RETRYABLE_API_ERRORS = (
     groq.APIConnectionError,   # includes APITimeoutError
@@ -62,12 +39,6 @@ def get_client():
         )
 
     return Groq(api_key=api_key, timeout=REQUEST_TIMEOUT, max_retries=0)
-
-def _strip_code_fences(text):
-    """Remove ```json ... ``` wrappers some models add despite instructions."""
-    text = text.strip()
-    match = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL)
-    return match.group(1) if match else text
 
 def validate_response(text):
     """Validate the AI response and return the required structured fields."""
@@ -409,7 +380,7 @@ def get_output_path(project_dir):
 def main():
     """Analyse every report and save all results to ai_output.json."""
     project_dir = Path(__file__).resolve().parent
-    reports_dir = project_dir / "reports"
+    reports_dir = project_dir / constants.REPORTS_DIR
     output_path = get_output_path(project_dir)
 
     report_files = sorted(reports_dir.glob("*.json"))

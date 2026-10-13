@@ -3,6 +3,9 @@ services:
     build: .
     stdin_open: true
     tty: true
+    env_file:
+      - path: .env
+        required: false
     volumes:
       - ./reports:/app/reports
       - ./data:/data

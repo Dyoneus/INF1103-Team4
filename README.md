@@ -38,7 +38,15 @@ Clarification answers are saved together before reassessment. Ctrl+C during the 
 
 The interactive application calls AI after saving a new report, retrying a failed assessment, or saving clarification answers. A missing API key leaves the report saved with status `AI_FAILED`, ready to retry after configuration.
 
-For Docker, copy `.env.example` to `.env` and replace `your_groq_api_key_here` with your Groq API key. Docker reads this file when passed `--env-file .env`. Do not commit `.env`.
+For Docker, configure the key once:
+
+1. If `.env` does not already exist, copy `.env.example` to `.env` in the project folder.
+2. Open `.env` and replace `your_groq_api_key_here` with your Groq API key, then save it. Preserve an existing configured key.
+3. Start the app with `docker compose run --rm safereport`.
+
+Compose automatically passes values from `.env` into the container; no key or environment flags are needed on the command line. After changing `.env`, exit the running app and run the command again. No image rebuild is needed for a key change. `.env` is excluded from Git and the Docker build; do not commit it.
+
+The optional `env_file` configuration requires Docker Compose 2.24.0 or later. Without `.env`, the app can still save reports, but AI assessment requires a configured key. After configuring it, choose **2. Retry a failed assessment** for existing failed reports.
 
 For local use, `.env` is not loaded automatically. Set the key in the current shell before running `python main.py`:
 
@@ -65,7 +73,7 @@ docker compose build
 docker compose run --rm safereport
 ```
 
-To enable AI assessment, configure `.env` as described above and start with `docker compose run --rm --env-file .env safereport`.
+To enable AI assessment, configure `.env` once as described above. The same launch command loads it automatically.
 
 The app is interactive. Choose **1. Create a new safety report**, complete the prompts, and let it finish saving before exiting. A report JSON file is created only after a report has been completed and submitted.
 
@@ -85,7 +93,7 @@ If you do not see a new report, check that you ran the command from the reposito
 To run the AI analysis script in Docker, copy `.env.example` to `.env`, set a valid Groq API key, and run:
 
 ```sh
-docker compose run --rm --env-file .env safereport python ai_manager.py
+docker compose run --rm safereport python ai_manager.py
 ```
 
 This AI step is separate from entering a report and requires a valid API key. It reads JSON report files from `reports/` and writes analysis results to `data/ai_output.json`. The report and result directories may contain personal or sensitive data. Keep them private and do not commit them.

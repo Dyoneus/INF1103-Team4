@@ -9,6 +9,7 @@ import pytest
 
 import ai_manager
 import data_manager
+import constants
 import io_manager
 import main
 
@@ -21,7 +22,7 @@ FIELDS = {
 
 
 def saved_report(tmp_path, monkeypatch, status, codes=None):
-    monkeypatch.setattr(data_manager, "REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(constants, "REPORTS_DIR", tmp_path)
     report = {
         "reference_id": "TEST-001", "submitted_at": "2026-01-01T12:00:00",
         "case_details": {
