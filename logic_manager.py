@@ -72,7 +72,6 @@ def check_needs_clarification(ai_output):
         ai_output["location_quality"] == "VAGUE"
         or ai_output["date_quality"] == "MISSING"
         or ai_output["time_quality"] == "MISSING"
-        or ai_output["safety_category"] == "UNCLEAR"
     ):
         return True
 
@@ -161,6 +160,7 @@ def process_ai_outputs(ai_outputs):
 
             if ai_output["time_quality"] == "MISSING":
                 clarification_codes.append("ADD_TIME")
+                
 
         if result["status"] == "READY_FOR_REVIEW":
             report = {
@@ -174,13 +174,6 @@ def process_ai_outputs(ai_outputs):
             }
 
         processed_reports.append(report)
-
-    try:
-        with open("processed_reports.json", "w", encoding="utf-8") as file:
-            json.dump(processed_reports, file, indent=4, ensure_ascii=False)
-
-    except (OSError, TypeError, ValueError):
-        print("Failed to save processed_reports.json")
 
     return processed_reports
 
