@@ -154,14 +154,11 @@ def process_ai_outputs(ai_outputs):
     for ai_output in ai_outputs:
         result = determine_report_status(ai_output)
 
-        if isinstance(ai_output, dict):
-            report = ai_output.copy()
-        else:
-            report = {}
-
-        # Add status and reason
-        report["status"] = result["status"]
-        report["reason"] = result["reason"]
+        report = {
+            "reference_id": ai_output.get("reference_id"),
+            "status": result["status"],
+            "reason": result["reason"]
+        }
 
         processed_reports.append(report)
 
@@ -175,24 +172,24 @@ def process_ai_outputs(ai_outputs):
     return processed_reports
 
 # For testing 
-# if __name__ == "__main__":
-#     ai_outputs = load_ai_output()
+if __name__ == "__main__":
+    ai_outputs = load_ai_output()
 
-#     if ai_outputs is None:
-#         print("Failed to load ai_output.json")
+    if ai_outputs is None:
+        print("Failed to load ai_output.json")
 
-#     else:
-#         for ai_output in ai_outputs:
+    else:
+        for ai_output in ai_outputs:
 
-#             # Test determine_report_status()
-#             result = determine_report_status(ai_output)
-#             print("Reference ID:", ai_output.get("reference_id"))
-#             print("Status:", result["status"])
-#             print("Reason:", result["reason"])
+            # Test determine_report_status()
+            result = determine_report_status(ai_output)
+            print("Reference ID:", ai_output.get("reference_id"))
+            print("Status:", result["status"])
+            print("Reason:", result["reason"])
 
-#         # Test process_ai_outputs()
-#         processed_reports = process_ai_outputs(ai_outputs)
-#         print("Total reports processed:", len(processed_reports))
-#         print("save in processed_reports.json.")
+        # Test process_ai_outputs()
+        processed_reports = process_ai_outputs(ai_outputs)
+        print("Total reports processed:", len(processed_reports))
+        print("save in processed_reports.json.")
 
-#         print()
+        print()
