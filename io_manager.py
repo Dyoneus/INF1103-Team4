@@ -447,6 +447,7 @@ def display_processing_error(error_code: str) -> None:
         "INVALID_JSON": "The AI returned an invalid response.",
         "INVALID_SCHEMA": "The AI response is missing required information.",
         "CONFIG_MISSING": "The AI API key has not been configured.",
+        "AI_FAILED": "AI processing could not be completed. Please try again later.",
         "SAVE_FAILED": "The report could not be saved.",
         "LOAD_FAILED": "Saved reports could not be loaded."
     }
@@ -465,6 +466,10 @@ def display_processing_error(error_code: str) -> None:
         "INVALID_JSON", "INVALID_SCHEMA", "CONFIG_MISSING"
     ):
         print("The report was not assessed.")
+
+def display_report_reference(reference_id):
+    """Display the locally saved report reference ID."""
+    print(f"\nReport saved locally. Reference ID: {reference_id}")
 
 """For running io_manager.py easily/debugging"""
 def run() -> None:
@@ -488,7 +493,3 @@ def run() -> None:
             continue
 
         print(f"\nReport submitted and saved to {report_path}")
-
-
-if __name__ == "__main__":
-    run()
