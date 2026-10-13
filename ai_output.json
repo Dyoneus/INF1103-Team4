@@ -14,5 +14,29 @@
         "time_quality": "EXACT",
         "safety_category": "FIRE",
         "reference_id": "20261009-204605-79b550"
+    },
+    {
+        "issue_clarity": "UNCLEAR",
+        "location_quality": "MISSING",
+        "date_quality": "MISSING",
+        "time_quality": "MISSING",
+        "safety_category": "UNCLEAR",
+        "reference_id": "20261013-114200-test01"
+    },
+    {
+        "issue_clarity": "CLEAR",
+        "location_quality": "VAGUE",
+        "date_quality": "MISSING",
+        "time_quality": "MISSING",
+        "safety_category": "UNCLEAR",
+        "reference_id": "20261013-114200-test02"
+    },
+    {
+        "issue_clarity": "CLEAR",
+        "location_quality": "ADEQUATE",
+        "date_quality": "EXACT",
+        "time_quality": "APPROXIMATE",
+        "safety_category": "ELECTRICAL",
+        "reference_id": "20261009-204605-test03"
     }
 ]
