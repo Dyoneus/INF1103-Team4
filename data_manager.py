@@ -65,7 +65,7 @@ def _write_report(report_path, report):
                 pass
 
 
-def update_report(reference_id, updated_data):
+def update_report(reference_id, updated_data, case_changes=None):
     if not isinstance(reference_id, str) or not reference_id.strip():
         return False
 
@@ -84,6 +84,17 @@ def update_report(reference_id, updated_data):
     # Only allow AI and Logic results to be updated.
     if not set(updated_data).issubset({"ai_result", "assessment"}):
         return False
+
+    if case_changes is not None:
+        if not isinstance(case_changes, dict) or not case_changes:
+            return False
+        if not set(case_changes).issubset({
+            "description", "workplace_location", "incident_datetime"
+        }):
+            return False
+        if any(not isinstance(value, str) or not value.strip()
+               for value in case_changes.values()):
+            return False
     
     report_path = REPORTS_DIR / (reference_id + ".json")
 
@@ -100,6 +111,17 @@ def update_report(reference_id, updated_data):
         if report.get("reference_id") != reference_id:
             return False
 
+        if case_changes is not None:
+            if not isinstance(report.get("case_details"), dict):
+                return False
+            report["case_details"].update(case_changes)
+            # Persist corrections before contacting AI. A cancelled or failed
+            # assessment can then be resumed through the retry menu.
+            report["ai_result"] = None
+            report["assessment"] = {
+                "status": "AI_FAILED", "clarification_codes": []
+            }
+
         report.update(updated_data)
 
         return _write_report(report_path, report)
@@ -107,6 +129,10 @@ def update_report(reference_id, updated_data):
     except (OSError, json.JSONDecodeError, UnicodeError):
         return False
 
+
+def save_clarifications(reference_id, changes):
+    """Atomically save corrected details and invalidate the old assessment."""
+    return update_report(reference_id, {}, case_changes=changes)
 
 
 def save_report(reference_id, ai_result, assessment):

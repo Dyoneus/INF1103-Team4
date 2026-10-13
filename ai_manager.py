@@ -118,6 +118,50 @@ def validate_response(text):
     return validated
 
 
+def looks_like_safety_observation(description):
+    """Return True when a free-text report appears to describe a genuine hazard."""
+    if not isinstance(description, str):
+        return False
+
+    cleaned = re.sub(r"[^a-z0-9\s]", " ", description.lower())
+    words = cleaned.split()
+
+    if not words:
+        return False
+
+    if len(words) < 3:
+        return False
+
+    safety_keywords = (
+        "accident", "alert", "barrier", "broken", "cable", "chemical", "collapse",
+        "danger", "damage", "electric", "electrical", "equipment", "exposed",
+        "fall", "fire", "gas", "hazard", "injury", "leak", "loose", "machine",
+        "noise", "obstruction", "safety", "slip", "smoke", "spark", "spill",
+        "trip", "unsafe", "ventilation", "warning", "workers", "workplace",
+    )
+
+    return any(keyword in cleaned for keyword in safety_keywords)
+
+
+def enforce_safety_context(incident_report, fields):
+    """Reject non-safety observations even when the model returns allowed labels."""
+    if not isinstance(fields, dict):
+        return fields
+
+    description = incident_report.get("description", "") if isinstance(incident_report, dict) else ""
+    if not description or not str(description).strip():
+        return fields
+    if looks_like_safety_observation(description):
+        return fields
+
+    fields = dict(fields)
+    if fields.get("issue_clarity") == "CLEAR":
+        fields["issue_clarity"] = "UNCLEAR"
+    if fields.get("safety_category") not in (None, "UNCLEAR"):
+        fields["safety_category"] = "UNCLEAR"
+    return fields
+
+
 def build_prompt(incident_report):
     """Build instructions for structured safety observation analysis."""
     report_json = json.dumps(
@@ -146,13 +190,14 @@ Use only the following allowed values:
 {allowed_section}
 
 Rules:
-
-Rules:
 1. Analyse the user's written safety observation and the information
    available in the report.
 2. Set issue_clarity to CLEAR when the safety concern can be understood.
    Otherwise, use UNCLEAR.
-3. Set location_quality to MISSING when no location is provided.
+3. If the text is not a meaningful workplace safety observation, do not
+   treat it as a valid hazard. Set issue_clarity to UNCLEAR and
+   safety_category to UNCLEAR.
+4. Set location_quality to MISSING when no location is provided.
    Use ADEQUATE when the location is sufficiently specific for follow-up.
    Use VAGUE when a location is provided but is not sufficiently specific.
 4. Set date_quality to MISSING when no date information is provided.
@@ -282,7 +327,8 @@ def analyze_incident(client, incident_report, photo_paths=None):
             if not text:
                 raise ValueError("AI returned an empty response.")
 
-            return validate_response(text)
+            fields = validate_response(text)
+            return enforce_safety_context(incident_report, fields)
 
         except (ValueError, *RETRYABLE_API_ERRORS) as exc:
             last_error = exc

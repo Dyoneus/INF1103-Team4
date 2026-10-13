@@ -65,6 +65,21 @@ def test_validate_response_rejects_invalid_output():
         )
 
 
+def test_non_safety_description_is_reclassified_as_unclear():
+    fields = {
+        "issue_clarity": "CLEAR",
+        "location_quality": "ADEQUATE",
+        "date_quality": "EXACT",
+        "time_quality": "EXACT",
+        "safety_category": "OTHER",
+    }
+
+    result = ai_manager.enforce_safety_context({"description": "The sun."}, fields)
+
+    assert result["issue_clarity"] == "UNCLEAR"
+    assert result["safety_category"] == "UNCLEAR"
+
+
 def test_validate_response_rejects_non_string_input():
     assert_raises(
         ValueError,

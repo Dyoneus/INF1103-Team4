@@ -4,8 +4,6 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from report_store import save_report
-
 MAX_DESCRIPTION_LENGTH = 2000  # The maximum length of a safety report description.
 MAX_NAME_LENGTH = 100
 MAX_LOCATION_LENGTH = 200
@@ -30,7 +28,7 @@ ERROR_MESSAGES = {
     "LOCATION_TOO_LONG": f"Location exceeds {MAX_LOCATION_LENGTH} characters.",
     "NAME_TOO_LONG": f"Name exceeds {MAX_NAME_LENGTH} characters.",
     "EMPTY_NAME": "Name cannot be empty.",
-    "EMPTY_WORKPLACE_NAME": "Contractor or workplace name cannot be empty.",
+    "EMPTY_WORKPLACE_NAME": "Workplace name cannot be empty.",
     "PHOTO_NOT_FOUND": "File not found. Check the path and try again.",
     "PHOTO_BAD_TYPE": "Only .jpg, .jpeg and .png photos are accepted.",
     "INVALID_DATETIME": "Invalid format. Use YYYY-MM-DD HH:MM, e.g. 2026-10-09 14:30.",
@@ -50,6 +48,8 @@ def display_menu() -> None:
     print("\nSafeReport!")
     print("-" * 48)
     print("1. Create a new safety report")
+    print("2. Retry a failed assessment")
+    print("3. Clarify and reassess a saved report")
     print("0. Exit")
     print("-" * 48)
 
@@ -64,10 +64,10 @@ def get_menu_choice() -> str:
             print("\nInput cancelled.")
             return "0"
 
-        if choice == "1" or choice == "0":
+        if choice in ("0", "1", "2", "3"):
             return choice
 
-        print("Invalid choice. Please enter 1 or 0.")
+        print("Invalid choice. Please enter 0, 1, 2 or 3.")
 
 
 """Prompt helpers"""
@@ -341,7 +341,7 @@ def collect_case_details() -> dict | None:
 
     print()
     workplace_name = ask_until_valid(
-        "Contractor or workplace name: ",
+        "Workplace name: ",
         validate_workplace_name,
     )
     location = ask_until_valid("Workplace location: ", validate_location)
@@ -355,7 +355,7 @@ def collect_case_details() -> dict | None:
         "description": description,
         "photos": photos,
         "consent_for_image_use": consent,
-        "workplace_or_contractor_name": workplace_name,
+        "workplace_name": workplace_name,
         "workplace_location": location,
         "incident_datetime": datetime.strptime(incident_text, DATETIME_FORMAT).isoformat(timespec="minutes"),
         "reporter_profile": profile,
@@ -377,6 +377,73 @@ def collect_contact_details() -> dict:
         "contact_type": contact_type,
         "contact_number": contact_number,
     }
+
+
+def display_report_summary(report: dict) -> None:
+    """Display the full completed report so the user can review it."""
+    case_details = report.get("case_details", {})
+    reporter = report.get("reporter", {})
+
+    print("\nReport summary")
+    print("-" * 48)
+    print("Case details:")
+    print(f"  Description: {case_details.get('description', '')}")
+    print(f"  Photos: {len(case_details.get('photos', []))} attached")
+    print(f"  Consent for photo use: {'Yes' if case_details.get('consent_for_image_use') else 'No'}")
+    print(f"  Workplace name: {case_details.get('workplace_name', '')}")
+    print(f"  Workplace location: {case_details.get('workplace_location', '')}")
+    print(f"  Incident date/time: {case_details.get('incident_datetime', '')}")
+    print(f"  Reporter profile: {case_details.get('reporter_profile', '')}")
+    print("\nContact details:")
+    print(f"  Name: {reporter.get('name', '')}")
+    print(f"  Email: {reporter.get('email', '')}")
+    print(f"  NRIC/FIN: {reporter.get('nric_fin', '')}")
+    print(f"  Contact type: {reporter.get('contact_type', '')}")
+    print(f"  Contact number: {reporter.get('contact_number', '')}")
+    print("-" * 48)
+
+
+def review_report_before_submission(report: dict | None) -> dict | None:
+    """Let the user review the whole report and update any section before saving."""
+    if not isinstance(report, dict):
+        return report
+
+    display_report_summary(report)
+
+    while True:
+        try:
+            answer = ask_yes_no("Would you like to make any changes before submitting this report?")
+        except (EOFError, KeyboardInterrupt, OSError):
+            return report
+
+        if not answer:
+            return report
+
+        try:
+            choice = ask_choice(
+                "\nWhich section would you like to edit?",
+                {"1": "Case details", "2": "Contact details", "0": "Submit report"},
+            )
+        except (EOFError, KeyboardInterrupt, OSError):
+            return report
+
+        if choice == "Submit report":
+            return report
+
+        if choice == "Case details":
+            updated_case = collect_case_details()
+            if updated_case is not None:
+                report["case_details"] = updated_case
+        elif choice == "Contact details":
+            report["reporter"] = collect_contact_details()
+
+        display_report_summary(report)
+
+        try:
+            if not ask_yes_no("Would you like to make any further changes?"):
+                return report
+        except (EOFError, KeyboardInterrupt, OSError):
+            return report
 
 
 def collect_report() -> dict | None:
@@ -471,25 +538,66 @@ def display_report_reference(reference_id):
     """Display the locally saved report reference ID."""
     print(f"\nReport saved locally. Reference ID: {reference_id}")
 
-"""For running io_manager.py easily/debugging"""
-def run() -> None:
-    """Show the menu and handle report creation until the user exits."""
+def select_saved_report(reports):
+    """Select an eligible record by number or reference ID; allow cancellation."""
+    if not reports:
+        print("\nNo matching reports found.")
+        return None
+    print("\nSaved reports:")
+    for number, report in enumerate(reports, start=1):
+        print(f"{number}. {report['reference_id']}")
     while True:
-        display_menu()
-        choice = get_menu_choice()
-
-        if choice == "0":
-            print("Exiting SafeReport.")
-            return
-
-        report = collect_report()
-        if report is None:
-            continue
-
         try:
-            report_path = save_report(report)
-        except OSError as error:
-            print(f"\nCould not save the report: {error}")
-            continue
+            choice = ask("Report number or reference ID (0 to cancel): ")
+        except (EOFError, KeyboardInterrupt):
+            print("\nSelection cancelled.")
+            return None
+        if choice == "0":
+            return None
+        for number, report in enumerate(reports, start=1):
+            if choice in (str(number), report["reference_id"]):
+                return report
+        print("Please select one of the listed reports.")
 
-        print(f"\nReport submitted and saved to {report_path}")
+
+def collect_clarifications(report):
+    """Collect corrections without mutating the report; cancel all on Ctrl+C."""
+    codes = report["assessment"].get("clarification_codes", [])
+    display_clarification_questions(codes)
+    details = report["case_details"]
+    changes = {}
+    try:
+        if "CLARIFY_OBSERVATION" in codes:
+            print(f"\nCurrent description: {details.get('description', '')}")
+            description = get_report_text()
+            if description is None:
+                return None
+            changes["description"] = description
+        if "ADD_LOCATION" in codes or "CLARIFY_LOCATION" in codes:
+            print(f"\nCurrent location: {details.get('workplace_location', '')}")
+            changes["workplace_location"] = ask_until_valid(
+                "Updated workplace location: ", validate_location
+            )
+        if "ADD_DATE" in codes or "ADD_TIME" in codes:
+            print(f"\nCurrent date/time: {details.get('incident_datetime', '')}")
+            value = ask_until_valid(
+                f"Date and time of incident ({DATETIME_HINT}): ",
+                validate_incident_datetime,
+            )
+            changes["incident_datetime"] = datetime.strptime(
+                value, DATETIME_FORMAT
+            ).isoformat(timespec="minutes")
+    except (EOFError, KeyboardInterrupt):
+        print("\nClarification cancelled. No changes saved.")
+        return None
+    return changes
+
+
+def run() -> None:
+    """Keep the old script command working through the shared application menu."""
+    from main import run as run_application
+    run_application()
+
+
+if __name__ == "__main__":
+    run()

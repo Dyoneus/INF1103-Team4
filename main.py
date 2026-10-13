@@ -38,6 +38,10 @@ def process_new_report():
     if report is None:
         return
 
+    report = io_manager.review_report_before_submission(report)
+    if report is None:
+        return
+
     # save the original report
     try:
         report_path = data_manager.create_report(report)
@@ -48,6 +52,11 @@ def process_new_report():
     reference_id = Path(report_path).stem
     io_manager.display_report_reference(reference_id)
 
+    assess_report(reference_id, report)
+
+
+def assess_report(reference_id, report):
+    """Assess an existing record and replace its saved AI and logic results."""
     # initialise the AI client
     try:
         client = ai_manager.get_client()
@@ -100,10 +109,58 @@ def process_new_report():
 
     # display results to the user
     io_manager.display_assessment_result(assessment)
-
     io_manager.display_clarification_questions(
         assessment["clarification_codes"]
     )
+
+    if assessment["clarification_codes"]:
+        report["assessment"] = assessment
+        changes = io_manager.collect_clarifications(report)
+        if changes is None:
+            return
+        if not data_manager.save_clarifications(reference_id, changes):
+            io_manager.display_processing_error("SAVE_FAILED")
+            return
+        report["case_details"].update(changes)
+        assess_report(reference_id, report)
+        return
+
+
+def retry_failed_report():
+    """Let the user retry one failed report without creating a duplicate."""
+    reports = data_manager.get_failed_ai_reports()
+    if reports is None:
+        io_manager.display_processing_error("LOAD_FAILED")
+        return
+    report = io_manager.select_saved_report(reports)
+    if report is not None:
+        assess_report(report["reference_id"], report)
+
+
+def clarify_report():
+    """Save corrections to a selected report, then assess it again."""
+    reports = data_manager.load_reports()
+    if reports is None:
+        io_manager.display_processing_error("LOAD_FAILED")
+        return
+    reports = [
+        report for report in reports
+        if isinstance(report.get("assessment"), dict)
+        and report["assessment"].get("status")
+        in ("INCOMPLETE", "NEEDS_CLARIFICATION")
+    ]
+    report = io_manager.select_saved_report(reports)
+    if report is None:
+        return
+    changes = io_manager.collect_clarifications(report)
+    if not changes:
+        return
+    reference_id = report["reference_id"]
+    if not data_manager.save_clarifications(reference_id, changes):
+        io_manager.display_processing_error("SAVE_FAILED")
+        return
+    report["case_details"].update(changes)
+    assess_report(reference_id, report)
 
 
 def run():
@@ -120,7 +177,12 @@ def run():
         if choice == "0":
             return
 
-        process_new_report()
+        if choice == "1":
+            process_new_report()
+        elif choice == "2":
+            retry_failed_report()
+        elif choice == "3":
+            clarify_report()
 
 
 if __name__ == "__main__":

@@ -1,6 +1,45 @@
 from io_manager import validate_report_text
 import io_manager
 
+def test_review_report_before_submission_allows_edits(monkeypatch, capsys):
+    report = {
+        "case_details": {
+            "description": "Old description",
+            "photos": [],
+            "consent_for_image_use": False,
+            "workplace_name": "Old workplace",
+            "workplace_location": "Old location",
+            "incident_datetime": "2026-10-13T10:00",
+            "reporter_profile": "Employee of the workplace",
+        },
+        "reporter": {
+            "name": "Jane",
+            "email": "jane@example.com",
+            "nric_fin": "S1234567D",
+            "contact_type": "Mobile",
+            "contact_number": "91234567",
+        },
+    }
+
+    answers = iter([True, False])
+    monkeypatch.setattr(io_manager, "ask_yes_no", lambda prompt: next(answers))
+    monkeypatch.setattr(io_manager, "ask_choice", lambda prompt, options: options["1"])
+    monkeypatch.setattr(
+        io_manager,
+        "collect_case_details",
+        lambda: {
+            **report["case_details"],
+            "workplace_name": "Updated workplace",
+            "workplace_location": "Updated location",
+        },
+    )
+
+    result = io_manager.review_report_before_submission(report)
+
+    assert result["case_details"]["workplace_name"] == "Updated workplace"
+    assert "Report summary" in capsys.readouterr().out
+
+
 def test_display_assessment_result(capsys):
     assessment = {"status": "NEEDS_CLARIFICATION"}
 
