@@ -60,3 +60,28 @@ def test_display_clarification_questions(capsys):
 
     assert "more specific location" in output
     assert "Approximately what time" in output
+
+def test_quota_error_display(capsys):
+    io_manager.display_processing_error("QUOTA_EXHAUSTED")
+
+    output = capsys.readouterr().out
+
+    assert "AI usage limit reached" in output
+    assert "The report was not assessed" in output
+
+
+def test_save_error_display(capsys):
+    io_manager.display_processing_error("SAVE_FAILED")
+
+    output = capsys.readouterr().out
+
+    assert "The report could not be saved" in output
+    assert "The report was not assessed" not in output
+
+
+def test_unknown_error_display(capsys):
+    io_manager.display_processing_error("UNKNOWN")
+
+    output = capsys.readouterr().out
+
+    assert "An unexpected error occurred" in output
