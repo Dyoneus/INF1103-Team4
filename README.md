@@ -14,7 +14,7 @@ SafeReport is a terminal application for recording workplace safety reports. It 
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
-python io_manager.py
+python main.py
 ```
 
 On macOS or Linux, activate the virtual environment with:
