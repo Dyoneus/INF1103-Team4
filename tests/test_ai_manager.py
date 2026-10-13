@@ -65,19 +65,52 @@ def test_validate_response_rejects_invalid_output():
         )
 
 
-def test_non_safety_description_is_reclassified_as_unclear():
-    fields = {
-        "issue_clarity": "CLEAR",
-        "location_quality": "ADEQUATE",
-        "date_quality": "EXACT",
-        "time_quality": "EXACT",
-        "safety_category": "OTHER",
+def test_clear_hazard_without_keywords_reaches_logic_unchanged():
+    fields = {**VALID_FIELDS, "safety_category": "SLIP_TRIP_FALL"}
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace()))
+    response = SimpleNamespace(choices=[
+        SimpleNamespace(message=SimpleNamespace(content=json.dumps(fields)))
+    ])
+
+    with patch.object(client.chat.completions, "create", create=True,
+                      return_value=response) as create:
+        result = ai_manager.analyze_incident(client, {
+            "description": "The staircase has no handrail on either side.",
+            "workplace_location": "Block 30, staircase B, third floor",
+            "incident_datetime": "2026-10-13T15:00",
+        })
+
+    create.assert_called_once()
+    assert result == fields
+    assessment = logic_manager.determine_report_status(
+        ai_manager.make_result("report-1", fields=result)
+    )
+    assert assessment == {
+        "status": "READY_FOR_REVIEW", "clarification_codes": []
     }
 
-    result = ai_manager.enforce_safety_context({"description": "The sun."}, fields)
 
-    assert result["issue_clarity"] == "UNCLEAR"
-    assert result["safety_category"] == "UNCLEAR"
+def test_ai_identified_non_safety_observation_is_incomplete_in_logic():
+    fields = {
+        **VALID_FIELDS, "issue_clarity": "UNCLEAR", "safety_category": "UNCLEAR"
+    }
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace()))
+    response = SimpleNamespace(choices=[
+        SimpleNamespace(message=SimpleNamespace(content=json.dumps(fields)))
+    ])
+
+    with patch.object(client.chat.completions, "create", create=True,
+                      return_value=response) as create:
+        result = ai_manager.analyze_incident(client, {"description": "The sun."})
+
+    create.assert_called_once()
+    assert result == fields
+    assessment = logic_manager.determine_report_status(
+        ai_manager.make_result("report-2", fields=result)
+    )
+    assert assessment == {
+        "status": "INCOMPLETE", "clarification_codes": ["CLARIFY_OBSERVATION"]
+    }
 
 
 def test_validate_response_rejects_non_string_input():
