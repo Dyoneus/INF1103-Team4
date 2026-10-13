@@ -1,0 +1,40 @@
+[
+    {
+        "status": "READY_FOR_REVIEW"
+    },
+    {
+        "status": "READY_FOR_REVIEW"
+    },
+    {
+        "status": "INCOMPLETE",
+        "clarification_codes": [
+            "CLARIFY_OBSERVATION",
+            "ADD_LOCATION",
+            "ADD_DATE",
+            "ADD_TIME"
+        ]
+    },
+    {
+        "status": "NEEDS_CLARIFICATION",
+        "clarification_codes": [
+            "CLARIFY_LOCATION",
+            "ADD_DATE",
+            "ADD_TIME"
+        ]
+    },
+    {
+        "status": "READY_FOR_REVIEW"
+    },
+    {
+        "status": "NEEDS_CLARIFICATION",
+        "clarification_codes": [
+            "ADD_DATE"
+        ]
+    },
+    {
+        "status": "NEEDS_CLARIFICATION",
+        "clarification_codes": [
+            "ADD_TIME"
+        ]
+    }
+]
