@@ -1,50 +1,25 @@
 [
     {
-        "issue_clarity": "CLEAR",
-        "location_quality": "ADEQUATE",
-        "date_quality": "EXACT",
-        "time_quality": "EXACT",
-        "safety_category": "SLIP_TRIP_FALL",
         "reference_id": "20261009-203903-85a5d3",
         "status": "READY_FOR_REVIEW",
         "reason": "The report contains sufficient information for review."
     },
     {
-        "issue_clarity": "CLEAR",
-        "location_quality": "ADEQUATE",
-        "date_quality": "EXACT",
-        "time_quality": "EXACT",
-        "safety_category": "FIRE",
         "reference_id": "20261009-204605-79b550",
         "status": "READY_FOR_REVIEW",
         "reason": "The report contains sufficient information for review."
     },
     {
-        "issue_clarity": "UNCLEAR",
-        "location_quality": "MISSING",
-        "date_quality": "MISSING",
-        "time_quality": "MISSING",
-        "safety_category": "UNCLEAR",
         "reference_id": "20261013-114200-test01",
         "status": "INCOMPLETE",
         "reason": "The safety issue is unclear or the location is missing."
     },
     {
-        "issue_clarity": "CLEAR",
-        "location_quality": "VAGUE",
-        "date_quality": "MISSING",
-        "time_quality": "MISSING",
-        "safety_category": "UNCLEAR",
         "reference_id": "20261013-114200-test02",
         "status": "NEEDS_CLARIFICATION",
         "reason": "The location, date, time or safety category needs clarification."
     },
     {
-        "issue_clarity": "CLEAR",
-        "location_quality": "ADEQUATE",
-        "date_quality": "EXACT",
-        "time_quality": "APPROXIMATE",
-        "safety_category": "ELECTRICAL",
         "reference_id": "20261009-204605-test03",
         "status": "READY_FOR_REVIEW",
         "reason": "The report contains sufficient information for review."
