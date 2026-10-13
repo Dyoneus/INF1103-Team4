@@ -78,10 +78,71 @@ def check_needs_clarification(ai_output):
         ai_output["location_quality"] == "VAGUE"
         or ai_output["date_quality"] == "MISSING"
         or ai_output["time_quality"] == "MISSING"
+        or ai_output["safety_category"] == "UNCLEAR"
     ):
         return True
 
     return False
+
+# Identify reports ready for review
+def check_ready_for_review(ai_output):
+    if not validate_ai_output(ai_output):
+        return False
+
+    # Reports with missing or unclear information are not ready
+    if check_incomplete(ai_output):
+        return False
+
+    if check_needs_clarification(ai_output):
+        return False
+
+    if (
+        ai_output["issue_clarity"] == "CLEAR"
+        and ai_output["location_quality"] == "ADEQUATE"
+        and ai_output["date_quality"] in ["EXACT", "APPROXIMATE"]
+        and ai_output["time_quality"] in ["EXACT", "APPROXIMATE"]
+    ):
+        return True
+
+    return False
+
+# Apply rules in the correct order
+def determine_report_status(ai_output):
+
+    # Rule 1: AI_FAILED
+    if not validate_ai_output(ai_output):
+        return {
+            "status": "AI_FAILED",
+            "reason": "AI output is invalid or analysis failed."
+        }
+
+    # Rule 2: INCOMPLETE
+    if check_incomplete(ai_output):
+        return {
+            "status": "INCOMPLETE",
+            "reason": "The safety issue is unclear or the location is missing."
+        }
+
+    # Rule 3: NEEDS_CLARIFICATION
+    if check_needs_clarification(ai_output):
+        return {
+            "status": "NEEDS_CLARIFICATION",
+            "reason": "The location, date, time or safety category needs clarification."
+        }
+
+    # Rule 4: READY_FOR_REVIEW
+    if check_ready_for_review(ai_output):
+        return {
+            "status": "READY_FOR_REVIEW",
+            "reason": "The report contains sufficient information for review."
+        }
+
+    # For unexpected combinations
+    return {
+        "status": "AI_FAILED",
+        "reason": "AI output could not be classified."
+    }
+
 
 # For testing 
 if __name__ == "__main__":
@@ -92,15 +153,24 @@ if __name__ == "__main__":
 
     else:
         for ai_output in ai_outputs:
+
+            result = determine_report_status(ai_output)
             print("Reference ID:", ai_output.get("reference_id"))
+            print("Status:", result["status"])
+            print("Reason:", result["reason"])
 
-            if not validate_ai_output(ai_output):
-                print("Status: AI_FAILED")
+            # print("Reference ID:", ai_output.get("reference_id"))
 
-            elif check_incomplete(ai_output):
-                print("Status: INCOMPLETE")
+            # if not validate_ai_output(ai_output):
+            #     print("Status: AI_FAILED")
 
-            elif check_needs_clarification(ai_output):
-                print("Status: NEEDS_CLARIFICATION")
+            # elif check_incomplete(ai_output):
+            #     print("Status: INCOMPLETE")
+
+            # elif check_needs_clarification(ai_output):
+            #     print("Status: NEEDS_CLARIFICATION")
+
+            # elif check_ready_for_review(ai_output):
+            #     print("Status: READY_FOR_REVIEW")
 
             print()
