@@ -80,10 +80,12 @@ def test_report_needs_clarification(monkeypatch):
     )
 
     monkeypatch.setattr(
+        main.io_manager, "display_clarification_questions",
+        lambda codes: displayed.update({"codes": codes})
+    )
+    monkeypatch.setattr(
         main.io_manager, "collect_clarifications",
-        lambda report: displayed.update(
-            {"codes": report["assessment"]["clarification_codes"]}
-        )
+        lambda report: None
     )
 
     #run the workflow
@@ -162,10 +164,12 @@ def test_other_readiness_statuses(
     )
 
     monkeypatch.setattr(
+        main.io_manager, "display_clarification_questions",
+        lambda codes: displayed.update({"codes": codes})
+    )
+    monkeypatch.setattr(
         main.io_manager, "collect_clarifications",
-        lambda report: displayed.update(
-            {"codes": report["assessment"]["clarification_codes"]}
-        )
+        lambda report: None
     )
 
     # Simulate original report saving
@@ -207,7 +211,7 @@ def test_other_readiness_statuses(
     )
 
     assert displayed["assessment"]["status"] == expected_status
-    assert displayed.get("codes", []) == expected_codes
+    assert displayed["codes"] == expected_codes
 
 
 def test_assess_report_asks_for_clarification_immediately(monkeypatch):

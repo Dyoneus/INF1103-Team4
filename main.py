@@ -64,69 +64,66 @@ def assess_report(reference_id, report):
         handle_ai_failure(reference_id, "CONFIG_MISSING")
         return
 
-    while True:
-        # prepare incident information for the AI
-        case_details = report["case_details"]
+    # prepare incident information for the AI
+    case_details = report["case_details"]
 
-        incident_data = {
-            key: value
-            for key, value in case_details.items()
-            if key != "photos"
-        }
+    incident_data = {
+        key: value
+        for key, value in case_details.items()
+        if key != "photos"
+    }
 
-        if case_details.get("consent_for_image_use") is True:
-            photo_paths = case_details.get("photos", [])
-        else:
-            photo_paths = []
+    if case_details.get("consent_for_image_use") is True:
+        photo_paths = case_details.get("photos", [])
+    else:
+        photo_paths = []
 
-        # analyse the incident
-        try:
-            ai_fields = ai_manager.analyze_incident(
-                client, incident_data, photo_paths
-            )
-        except RuntimeError:
-            handle_ai_failure(reference_id, "AI_FAILED")
-            return
-
-        ai_result = ai_manager.make_result(
-            reference_id, fields=ai_fields
+    # analyse the incident
+    try:
+        ai_fields = ai_manager.analyze_incident(
+            client, incident_data, photo_paths
         )
+    except RuntimeError:
+        handle_ai_failure(reference_id, "AI_FAILED")
+        return
 
-        # determine report readiness
-        assessment = logic_manager.determine_report_status(ai_result)
+    ai_result = ai_manager.make_result(
+        reference_id, fields=ai_fields
+    )
 
-        if assessment["status"] == "AI_FAILED":
-            handle_ai_failure(reference_id, "INVALID_SCHEMA")
+    # determine report readiness
+    assessment = logic_manager.determine_report_status(ai_result)
+
+    if assessment["status"] == "AI_FAILED":
+        handle_ai_failure(reference_id, "INVALID_SCHEMA")
+        return
+
+    # save AI and Logic results
+    saved = data_manager.save_report(
+        reference_id, ai_result, assessment
+    )
+
+    if not saved:
+        io_manager.display_processing_error("SAVE_FAILED")
+        return
+
+    # display results to the user
+    io_manager.display_assessment_result(assessment)
+    io_manager.display_clarification_questions(
+        assessment["clarification_codes"]
+    )
+
+    if assessment["clarification_codes"]:
+        report["assessment"] = assessment
+        changes = io_manager.collect_clarifications(report)
+        if changes is None:
             return
-
-        # save AI and Logic results
-        saved = data_manager.save_report(
-            reference_id, ai_result, assessment
-        )
-
-        if not saved:
+        if not data_manager.save_clarifications(reference_id, changes):
             io_manager.display_processing_error("SAVE_FAILED")
             return
-
-        # display results to the user
-        io_manager.display_assessment_result(assessment)
-        report["assessment"] = assessment
-        if not assessment["clarification_codes"]:
-            return
-        if not collect_and_save_clarifications(reference_id, report):
-            return
-
-
-def collect_and_save_clarifications(reference_id, report):
-    """Collect and persist corrections before allowing another AI assessment."""
-    changes = io_manager.collect_clarifications(report)
-    if not changes:
-        return False
-    if not data_manager.save_clarifications(reference_id, changes):
-        io_manager.display_processing_error("SAVE_FAILED")
-        return False
-    report["case_details"].update(changes)
-    return True
+        report["case_details"].update(changes)
+        assess_report(reference_id, report)
+        return
 
 
 def retry_failed_report():
@@ -155,9 +152,15 @@ def clarify_report():
     report = io_manager.select_saved_report(reports)
     if report is None:
         return
+    changes = io_manager.collect_clarifications(report)
+    if not changes:
+        return
     reference_id = report["reference_id"]
-    if collect_and_save_clarifications(reference_id, report):
-        assess_report(reference_id, report)
+    if not data_manager.save_clarifications(reference_id, changes):
+        io_manager.display_processing_error("SAVE_FAILED")
+        return
+    report["case_details"].update(changes)
+    assess_report(reference_id, report)
 
 
 def run():

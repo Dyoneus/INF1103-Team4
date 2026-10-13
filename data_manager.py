@@ -1,25 +1,26 @@
 import json
 import os
 import tempfile
+from pathlib import Path
 from report_store import save_report as save_raw_report
 
-import constants
+REPORTS_DIR = Path("reports")
 
 def create_report(report):
     """Save a new raw report and return its file path."""
     return save_raw_report(report)
 
 def load_reports():
-    if not constants.REPORTS_DIR.exists():
+    if not REPORTS_DIR.exists():
         return []
 
-    if not constants.REPORTS_DIR.is_dir():
+    if not REPORTS_DIR.is_dir():
         return None
 
     reports = []
     
     try:
-        for reports_path in sorted(constants.REPORTS_DIR.glob("*.json")):
+        for reports_path in sorted(REPORTS_DIR.glob("*.json")):
             with reports_path.open("r", encoding="utf-8") as file:
                 report = json.load(file)
 
@@ -43,7 +44,7 @@ def _write_report(report_path, report):
         with tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
-            dir=constants.REPORTS_DIR,
+            dir=REPORTS_DIR,
             suffix=".tmp",
             delete=False
         ) as file:
@@ -95,7 +96,7 @@ def update_report(reference_id, updated_data, case_changes=None):
                for value in case_changes.values()):
             return False
     
-    report_path = constants.REPORTS_DIR / (reference_id + ".json")
+    report_path = REPORTS_DIR / (reference_id + ".json")
 
     try:
         if not report_path.is_file():
