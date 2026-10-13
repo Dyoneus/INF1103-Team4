@@ -413,6 +413,28 @@ def display_assessment_result(assessment: dict) -> None:
     else:
         print("Assessment result unavailable.")
 
+def display_clarification_questions(codes: list[str]) -> None:
+    """display clarification questsions based on the given codes"""
+
+    questions = {
+        "CLARIFY_OBSERVATION": "Please describe what you observed in more detail.",
+        "ADD_LOCATION": "Where did you observe this?",
+        "CLARIFY_LOCATION": "Can you provide a more specific location?",
+        "ADD_DATE": "What date did this happen?",
+        "ADD_TIME": "Approximately what time did this happen?"
+    }
+
+    if not codes:
+        return
+
+    print("\nPlease clarify the following:")
+
+    for code in codes:
+        if code in questions:
+            print("- " + questions[code])
+        else:
+            print("- Clarification question unavailable.")
+
 """For running io_manager.py easily/debugging"""
 def run() -> None:
     """Show the menu and handle report creation until the user exits."""
