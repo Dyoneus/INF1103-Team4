@@ -66,8 +66,24 @@ def check_incomplete(ai_output):
 
     return False
 
+# Identify reports needing clarification
+def check_needs_clarification(ai_output):
+    if not validate_ai_output(ai_output):
+        return False
 
-#For testing 
+    if check_incomplete(ai_output):
+        return False
+
+    if (
+        ai_output["location_quality"] == "VAGUE"
+        or ai_output["date_quality"] == "MISSING"
+        or ai_output["time_quality"] == "MISSING"
+    ):
+        return True
+
+    return False
+
+# For testing 
 if __name__ == "__main__":
     ai_outputs = load_ai_output()
 
@@ -79,12 +95,12 @@ if __name__ == "__main__":
             print("Reference ID:", ai_output.get("reference_id"))
 
             if not validate_ai_output(ai_output):
-                print("Invalid AI output")
+                print("Status: AI_FAILED")
 
             elif check_incomplete(ai_output):
                 print("Status: INCOMPLETE")
 
-            else:
-                print("Status: OK")
+            elif check_needs_clarification(ai_output):
+                print("Status: NEEDS_CLARIFICATION")
 
             print()
