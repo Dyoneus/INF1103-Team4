@@ -143,34 +143,56 @@ def determine_report_status(ai_output):
         "reason": "AI output could not be classified."
     }
 
+# Return consistent results for all AI outputs
+def process_ai_outputs(ai_outputs):
+
+    if not isinstance(ai_outputs, list):
+        return []
+
+    processed_reports = []
+
+    for ai_output in ai_outputs:
+        result = determine_report_status(ai_output)
+
+        if isinstance(ai_output, dict):
+            report = ai_output.copy()
+        else:
+            report = {}
+
+        # Add status and reason
+        report["status"] = result["status"]
+        report["reason"] = result["reason"]
+
+        processed_reports.append(report)
+
+    try:
+        with open("processed_reports.json", "w", encoding="utf-8") as file:
+            json.dump(processed_reports, file, indent=4, ensure_ascii=False)
+
+    except (OSError, TypeError, ValueError):
+        print("Failed to save processed_reports.json")
+
+    return processed_reports
 
 # For testing 
-if __name__ == "__main__":
-    ai_outputs = load_ai_output()
+# if __name__ == "__main__":
+#     ai_outputs = load_ai_output()
 
-    if ai_outputs is None:
-        print("Failed to load ai_output.json")
+#     if ai_outputs is None:
+#         print("Failed to load ai_output.json")
 
-    else:
-        for ai_output in ai_outputs:
+#     else:
+#         for ai_output in ai_outputs:
 
-            result = determine_report_status(ai_output)
-            print("Reference ID:", ai_output.get("reference_id"))
-            print("Status:", result["status"])
-            print("Reason:", result["reason"])
+#             # Test determine_report_status()
+#             result = determine_report_status(ai_output)
+#             print("Reference ID:", ai_output.get("reference_id"))
+#             print("Status:", result["status"])
+#             print("Reason:", result["reason"])
 
-            # print("Reference ID:", ai_output.get("reference_id"))
+#         # Test process_ai_outputs()
+#         processed_reports = process_ai_outputs(ai_outputs)
+#         print("Total reports processed:", len(processed_reports))
+#         print("save in processed_reports.json.")
 
-            # if not validate_ai_output(ai_output):
-            #     print("Status: AI_FAILED")
-
-            # elif check_incomplete(ai_output):
-            #     print("Status: INCOMPLETE")
-
-            # elif check_needs_clarification(ai_output):
-            #     print("Status: NEEDS_CLARIFICATION")
-
-            # elif check_ready_for_review(ai_output):
-            #     print("Status: READY_FOR_REVIEW")
-
-            print()
+#         print()
