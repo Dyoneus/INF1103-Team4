@@ -47,39 +47,39 @@ AI results are written to `ai_output.json` by default. Set `AI_OUTPUT_PATH` to c
 
 ## Run with Docker
 
-Build the image from the repository root:
+### Start the report-entry app
 
-```sh
-docker build -t safereport .
+Run these commands from the repository root (the folder containing `docker-compose.yml`):
+
+```powershell
+docker compose build
+docker compose run --rm safereport
 ```
 
-Create named volumes once. The first stores reports and attached photos; the second stores AI results:
+The app is interactive. Choose **1. Create a new safety report**, complete the prompts, and let it finish saving before exiting. A report JSON file is created only after a report has been completed and submitted.
+
+### Where the files go
+
+Compose connects folders on your computer to folders inside the container:
+
+| On your computer | Inside the container | Contents |
+|---|---|---|
+| `reports/` | `/app/reports` | Submitted report JSON files and copied photos |
+| `data/` | `/data` | AI analysis results, including `ai_output.json` |
+
+This is a **bind mount**: the container writes directly into these project folders. Files remain on your computer after the container exits, even though `--rm` removes the temporary container. Docker creates the host folders if they do not already exist.
+
+If you do not see a new report, check that you ran the command from the repository root and completed report submission. Then refresh the `reports/` folder in your editor or File Explorer.
+
+To run the AI analysis script in Docker, copy `.env.example` to `.env`, set a valid Groq API key, and run:
 
 ```sh
-docker volume create safereport-reports
-docker volume create safereport-results
+docker compose run --rm --env-file .env safereport python ai_manager.py
 ```
 
-Start the interactive report-entry application:
+This AI step is separate from entering a report and requires a valid API key. It reads JSON report files from `reports/` and writes analysis results to `data/ai_output.json`. The report and result directories may contain personal or sensitive data. Keep them private and do not commit them.
 
-```sh
-docker run --rm -it --mount type=volume,source=safereport-reports,target=/app/reports safereport
-```
-
-Reports and photos in `safereport-reports` remain available after the container exits or is removed. To list or inspect them, use `docker volume inspect safereport-reports`.
-
-To run the AI analysis script in Docker, ensure reports are present in the reports volume and `.env` contains a valid API key:
-
-```sh
-docker run --rm --mount type=volume,source=safereport-reports,target=/app/reports --mount type=volume,source=safereport-results,target=/data --env-file .env safereport python ai_manager.py
-```
-
-The results volume keeps `/data/ai_output.json` available across runs. Protect both volumes as they may contain personal or sensitive report data. Remove a volume only when you intentionally want to delete its stored data:
-
-```sh
-docker volume rm safereport-reports
-docker volume rm safereport-results
-```
+Use the Compose commands above if you want files to appear in the project folders. If you run the image directly with `docker run` and mount a **named volume** at `/app/reports`, Docker keeps the files in its own managed storage; they will persist, but they will not appear in the project’s local `reports/` folder.
 
 ## Tests
 

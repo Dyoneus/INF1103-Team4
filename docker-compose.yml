@@ -1,0 +1,8 @@
+services:
+  safereport:
+    build: .
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./reports:/app/reports
+      - ./data:/data

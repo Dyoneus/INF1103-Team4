@@ -13,5 +13,6 @@ __pycache__/
 # User and generated application data
 reports/
 reports.json
+data/
 ai_output.json
 processed_reports.json

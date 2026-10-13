@@ -7,6 +7,7 @@ __pycache__/
 .env
 .env.*
 reports/
+data/
 reports.json
 ai_output.json
 processed_reports.json
