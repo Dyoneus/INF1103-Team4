@@ -1,14 +1,3 @@
-import json
-
-#Load ai output from a JSON file
-def load_ai_output():
-    try:
-        with open("ai_output.json", "r") as file:
-            return json.load(file)
-
-    except (FileNotFoundError, json.JSONDecodeError):
-        return None
-
 # Allowed values from the AI Manager
 ALLOWED_VALUES = {
     "issue_clarity": ["CLEAR", "UNCLEAR"],
@@ -106,29 +95,44 @@ def determine_report_status(ai_output):
     if not validate_ai_output(ai_output):
         return {
             "status": "AI_FAILED",
+            "clarification_codes": []
         }
+
+    clarification_codes = []
+
+    if ai_output["issue_clarity"] == "UNCLEAR":
+        clarification_codes.append("CLARIFY_OBSERVATION")
+
+    if ai_output["location_quality"] == "MISSING":
+        clarification_codes.append("ADD_LOCATION")
+    elif ai_output["location_quality"] == "VAGUE":
+        clarification_codes.append("CLARIFY_LOCATION")
+
+    if ai_output["date_quality"] == "MISSING":
+        clarification_codes.append("ADD_DATE")
+
+    if ai_output["time_quality"] == "MISSING":
+        clarification_codes.append("ADD_TIME")
 
     # Rule 2: INCOMPLETE
     if check_incomplete(ai_output):
-        return {
-            "status": "INCOMPLETE",
-        }
+        status = "INCOMPLETE"
 
     # Rule 3: NEEDS_CLARIFICATION
-    if check_needs_clarification(ai_output):
-        return {
-            "status": "NEEDS_CLARIFICATION",
-        }
+    elif check_needs_clarification(ai_output):
+        status = "NEEDS_CLARIFICATION"
 
     # Rule 4: READY_FOR_REVIEW
-    if check_ready_for_review(ai_output):
-        return {
-            "status": "READY_FOR_REVIEW",
-        }
+    elif check_ready_for_review(ai_output):
+        status = "READY_FOR_REVIEW"
 
     # For unexpected combinations
+    else:
+        status = "AI_FAILED"
+
     return {
-        "status": "AI_FAILED",
+        "status": status,
+        "clarification_codes": clarification_codes
     }
 
 # Return consistent results for all AI outputs
@@ -141,59 +145,6 @@ def process_ai_outputs(ai_outputs):
 
     for ai_output in ai_outputs:
         result = determine_report_status(ai_output)
-
-        clarification_codes = []
-
-        if isinstance(ai_output, dict) and validate_ai_output(ai_output):
-
-            if ai_output["issue_clarity"] == "UNCLEAR":
-                clarification_codes.append("CLARIFY_OBSERVATION")
-
-            if ai_output["location_quality"] == "MISSING":
-                clarification_codes.append("ADD_LOCATION")
-
-            if ai_output["location_quality"] == "VAGUE":
-                clarification_codes.append("CLARIFY_LOCATION")
-
-            if ai_output["date_quality"] == "MISSING":
-                clarification_codes.append("ADD_DATE")
-
-            if ai_output["time_quality"] == "MISSING":
-                clarification_codes.append("ADD_TIME")
-                
-
-        if result["status"] == "READY_FOR_REVIEW":
-            report = {
-                "status": result["status"]
-            }
-
-        else:
-            report = {
-                "status": result["status"],
-                "clarification_codes": clarification_codes
-            }
-
-        processed_reports.append(report)
+        processed_reports.append(result)
 
     return processed_reports
-
-# For testing 
-# if __name__ == "__main__":
-#     ai_outputs = load_ai_output()
-
-#     if ai_outputs is None:
-#         print("Failed to load ai_output.json")
-
-#     else:
-#         if isinstance(ai_outputs, dict):
-#             ai_outputs = [ai_outputs]
-
-#         processed_reports = process_ai_outputs(ai_outputs)
-
-#         for report in processed_reports:
-#             print("Status:", report["status"])
-
-#             if "clarification_codes" in report:
-#                 print("Clarification Codes:", report["clarification_codes"])
-
-#             print()  
