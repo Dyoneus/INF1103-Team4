@@ -83,14 +83,22 @@ Use the Compose commands above if you want files to appear in the project folder
 
 ## Tests
 
-Run the complete test suite locally:
+Run the AI manager tests locally:
 
 ```sh
-python -m unittest discover -s tests -v
+python tests/test_ai_manager.py
 ```
 
-Run the same suite in the built image:
+The AI manager test file uses plain functions and a small built-in runner, so run it directly rather than using `unittest discover`.
+
+The separate `test_io_manager.py` file uses pytest-style test functions. If `pytest` is installed, run those with:
 
 ```sh
-docker run --rm --entrypoint python safereport -m unittest discover -s tests -v
+python -m pytest tests/test_io_manager.py
+```
+
+Run the AI manager tests in Docker:
+
+```sh
+docker compose run --rm --entrypoint python safereport tests/test_ai_manager.py
 ```
