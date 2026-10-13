@@ -534,6 +534,29 @@ def display_processing_error(error_code: str) -> None:
     ):
         print("The report was not assessed.")
 
+def display_report_analysis_started(filename: str, photo_count: int) -> None:
+    """Show which report is being analysed and how many photos it includes."""
+    print(f"Analyzing {filename} with {photo_count} photo(s)...")
+
+
+def display_analysis_summary(
+    output_path: str,
+    total: int,
+    successful: int,
+    failed: int,
+) -> None:
+    """Show where analysis results were saved and the report outcome counts."""
+    print(f"\nAI results saved to: {output_path}")
+    print(f"Total reports: {total}")
+    print(f"Successful: {successful}")
+    print(f"Failed: {failed}")
+
+
+def display_analysis_error(message: str) -> None:
+    """Show an error that prevented analysis from completing."""
+    print(f"Error: {message}")
+
+
 def display_report_reference(reference_id):
     """Display the locally saved report reference ID."""
     print(f"\nReport saved locally. Reference ID: {reference_id}")
