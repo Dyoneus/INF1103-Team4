@@ -36,12 +36,6 @@ def validate_ai_output(ai_output):
     if "error" in ai_output:
         return False
 
-    if not isinstance(ai_output.get("reference_id"), str):
-        return False
-
-    if not ai_output["reference_id"].strip():
-        return False
-
     for field, allowed_values in ALLOWED_VALUES.items():
         value = ai_output.get(field)
 
@@ -113,34 +107,29 @@ def determine_report_status(ai_output):
     if not validate_ai_output(ai_output):
         return {
             "status": "AI_FAILED",
-            "reason": "AI output is invalid or analysis failed."
         }
 
     # Rule 2: INCOMPLETE
     if check_incomplete(ai_output):
         return {
             "status": "INCOMPLETE",
-            "reason": "The safety issue is unclear or the location is missing."
         }
 
     # Rule 3: NEEDS_CLARIFICATION
     if check_needs_clarification(ai_output):
         return {
             "status": "NEEDS_CLARIFICATION",
-            "reason": "The location, date, time or safety category needs clarification."
         }
 
     # Rule 4: READY_FOR_REVIEW
     if check_ready_for_review(ai_output):
         return {
             "status": "READY_FOR_REVIEW",
-            "reason": "The report contains sufficient information for review."
         }
 
     # For unexpected combinations
     return {
         "status": "AI_FAILED",
-        "reason": "AI output could not be classified."
     }
 
 # Return consistent results for all AI outputs
@@ -154,11 +143,35 @@ def process_ai_outputs(ai_outputs):
     for ai_output in ai_outputs:
         result = determine_report_status(ai_output)
 
-        report = {
-            "reference_id": ai_output.get("reference_id"),
-            "status": result["status"],
-            "reason": result["reason"]
-        }
+        clarification_codes = []
+
+        if isinstance(ai_output, dict) and validate_ai_output(ai_output):
+
+            if ai_output["issue_clarity"] == "UNCLEAR":
+                clarification_codes.append("CLARIFY_OBSERVATION")
+
+            if ai_output["location_quality"] == "MISSING":
+                clarification_codes.append("ADD_LOCATION")
+
+            if ai_output["location_quality"] == "VAGUE":
+                clarification_codes.append("CLARIFY_LOCATION")
+
+            if ai_output["date_quality"] == "MISSING":
+                clarification_codes.append("ADD_DATE")
+
+            if ai_output["time_quality"] == "MISSING":
+                clarification_codes.append("ADD_TIME")
+
+        if result["status"] == "READY_FOR_REVIEW":
+            report = {
+                "status": result["status"]
+            }
+
+        else:
+            report = {
+                "status": result["status"],
+                "clarification_codes": clarification_codes
+            }
 
         processed_reports.append(report)
 
@@ -172,24 +185,22 @@ def process_ai_outputs(ai_outputs):
     return processed_reports
 
 # For testing 
-if __name__ == "__main__":
-    ai_outputs = load_ai_output()
+# if __name__ == "__main__":
+#     ai_outputs = load_ai_output()
 
-    if ai_outputs is None:
-        print("Failed to load ai_output.json")
+#     if ai_outputs is None:
+#         print("Failed to load ai_output.json")
 
-    else:
-        for ai_output in ai_outputs:
+#     else:
+#         if isinstance(ai_outputs, dict):
+#             ai_outputs = [ai_outputs]
 
-            # Test determine_report_status()
-            result = determine_report_status(ai_output)
-            print("Reference ID:", ai_output.get("reference_id"))
-            print("Status:", result["status"])
-            print("Reason:", result["reason"])
+#         processed_reports = process_ai_outputs(ai_outputs)
 
-        # Test process_ai_outputs()
-        processed_reports = process_ai_outputs(ai_outputs)
-        print("Total reports processed:", len(processed_reports))
-        print("save in processed_reports.json.")
+#         for report in processed_reports:
+#             print("Status:", report["status"])
 
-        print()
+#             if "clarification_codes" in report:
+#                 print("Clarification Codes:", report["clarification_codes"])
+
+#             print()  
