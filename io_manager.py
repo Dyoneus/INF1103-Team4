@@ -393,6 +393,26 @@ def collect_report() -> dict | None:
     return {"case_details": case_details, "reporter": reporter}
 
 
+"""to display the readiness of the report"""
+def display_assessment_result(assessment: dict) -> None:
+    """Display the assessment result to the user."""
+    status = assessment.get("status")
+
+    print("\nReport Assessment")
+    print("-" * 48)
+
+    if status == "READY_FOR_REVIEW":
+        print("Status: Ready for review")
+
+    elif status == "NEEDS_CLARIFICATION":
+        print("Status: Needs clarification")
+
+    elif status == "INCOMPLETE":
+        print("Status: Incomplete")
+
+    else:
+        print("Assessment result unavailable.")
+
 """For running io_manager.py easily/debugging"""
 def run() -> None:
     """Show the menu and handle report creation until the user exits."""
