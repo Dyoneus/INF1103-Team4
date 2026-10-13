@@ -2,9 +2,13 @@ import json
 import os
 import tempfile
 from pathlib import Path
+from report_store import save_report as save_raw_report
 
 REPORTS_DIR = Path("reports")
 
+def create_report(report):
+    """Save a new raw report and return its file path."""
+    return save_raw_report(report)
 
 def load_reports():
     if not REPORTS_DIR.exists():
