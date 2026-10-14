@@ -25,7 +25,7 @@ source .venv/bin/activate
 
 Submitted reports and copied photos are saved under `reports/`. That directory is local application data and is excluded from Git.
 
-Both `python main.py` open the same menu:
+Both `python main.py` open the SafeReport menu:
 
 - **1. Create a new safety report** saves the report and assesses its readiness.
 - **2. Retry a failed assessment** lists failed reports. Select a number or reference ID to retry and update that same report.
@@ -94,27 +94,53 @@ Use the Compose commands above if you want files to appear in the project folder
 
 ## Tests
 
-Run the complete test suite (AI calls are mocked):
+SafeReport includes automated tests for the four managers and the main application workflow.
 
-```sh
-python -m pytest -q
+### Business Rule Test Script
+
+`test_script.py` demonstrates the business rules implemented in `logic_manager.py` using predefined AI outputs.
+
+The 8 test cases cover:
+- Reports ready for review
+- Approximate date and time
+- Unclear safety observations
+- Missing workplace locations
+- Vague workplace locations
+- Missing dates
+- Missing times
+- Multiple missing fields and rule priority
+
+Run the business rule test script:
+
+```powershell
+python -m pytest test_script.py -v
 ```
 
-Run the AI manager tests locally:
+These tests run offline without calling Groq or requiring an API key.
 
-```sh
-python tests/test_ai_manager.py
+### Complete Test Suite
+
+Run all automated tests:
+
+```powershell
+python -m pytest tests test_script.py -q
 ```
 
-The AI manager test file uses plain functions and a small built-in runner, so run it directly rather than using `unittest discover`.
+The complete suite checks input validation, AI response handling, business rules, JSON persistence, and application workflows.
 
-The separate `test_io_manager.py` file uses pytest-style test functions. If `pytest` is installed, run those with:
+### Individual Manager Tests
 
-```sh
-python -m pytest tests/test_io_manager.py
+To test a specific module:
+
+```powershell
+python -m pytest tests/test_ai_manager.py -v
+python -m pytest tests/test_io_manager.py -v
+python -m pytest tests/test_main.py -v
 ```
 
-Run the AI manager tests in Docker:
+The automated tests use simulated AI responses rather than making live Groq API requests.
+
+To Run the AI manager tests in Docker:
 
 ```sh
 docker compose run --rm --entrypoint python safereport tests/test_ai_manager.py
