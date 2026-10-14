@@ -8,6 +8,7 @@ import ai_manager
 import logic_manager
 import data_manager
 
+MAX_CLARIFICATION_ATTEMPTS = 5 #to prevent recursion (if the user keeps giving info and groq keeps returning NEEDS_CLARIFICATION)
 
 def handle_ai_failure(reference_id, error_code):
     """Save an AI failure and inform the user."""
@@ -52,7 +53,10 @@ def process_new_report():
     reference_id = Path(report_path).stem
     io_manager.display_report_reference(reference_id)
 
-    assess_report(reference_id, report)
+    assessment = assess_report(reference_id, report)
+
+    if assessment is not None:
+        run_clarification_loop(reference_id, report, assessment)
 
 
 def assess_report(reference_id, report):
@@ -107,23 +111,64 @@ def assess_report(reference_id, report):
         io_manager.display_processing_error("SAVE_FAILED")
         return
 
-    # display results to the user
+    #display the assessment and return it
     io_manager.display_assessment_result(assessment)
-    io_manager.display_clarification_questions(
-        assessment["clarification_codes"]
-    )
 
-    if assessment["clarification_codes"]:
-        report["assessment"] = assessment
-        changes = io_manager.collect_clarifications(report)
-        if changes is None:
+    return assessment
+
+
+def run_clarification_loop(reference_id, report, assessment):
+    """allow up to two clarification reassessments."""
+
+    for attempt in range(MAX_CLARIFICATION_ATTEMPTS):
+
+        #stop if the report no longer needs clarification
+        if assessment["status"] not in (
+            "INCOMPLETE",
+            "NEEDS_CLARIFICATION"
+        ):
             return
-        if not data_manager.save_clarifications(reference_id, changes):
+
+        if not assessment.get("clarification_codes"):
+            return
+
+        #keep the current assessment available to I/O Manager
+        report["assessment"] = assessment
+
+        #collect updated information
+        try:
+            changes = io_manager.collect_clarifications(report)
+        except (EOFError, KeyboardInterrupt):
+            return
+
+        #user cancelled clarification
+        if not changes:
+            return
+
+        #update the existing saved report
+        if not data_manager.save_clarifications(
+            reference_id, changes
+        ):
             io_manager.display_processing_error("SAVE_FAILED")
             return
+
+        #update the report in memory
         report["case_details"].update(changes)
-        assess_report(reference_id, report)
-        return
+
+        #perform one reassessment
+        assessment = assess_report(reference_id, report)
+
+        if assessment is None:
+            return
+
+    #show outstanding questions after reaching the limit
+    if assessment["status"] in (
+        "INCOMPLETE",
+        "NEEDS_CLARIFICATION"
+    ):
+        io_manager.display_clarification_questions(
+            assessment.get("clarification_codes", [])
+        )
 
 
 def retry_failed_report():
@@ -134,34 +179,43 @@ def retry_failed_report():
         return
     report = io_manager.select_saved_report(reports)
     if report is not None:
-        assess_report(report["reference_id"], report)
+        reference_id = report["reference_id"]
 
+        assessment = assess_report(reference_id, report)
+
+        if assessment is not None:
+            run_clarification_loop(
+                reference_id, report, assessment
+            )
 
 def clarify_report():
-    """Save corrections to a selected report, then assess it again."""
+    """resume clarification for a saved report."""
+
     reports = data_manager.load_reports()
+
     if reports is None:
         io_manager.display_processing_error("LOAD_FAILED")
         return
+
+    #retrieve reports that require clarification
     reports = [
         report for report in reports
         if isinstance(report.get("assessment"), dict)
         and report["assessment"].get("status")
         in ("INCOMPLETE", "NEEDS_CLARIFICATION")
     ]
+
     report = io_manager.select_saved_report(reports)
+
     if report is None:
         return
-    changes = io_manager.collect_clarifications(report)
-    if not changes:
-        return
-    reference_id = report["reference_id"]
-    if not data_manager.save_clarifications(reference_id, changes):
-        io_manager.display_processing_error("SAVE_FAILED")
-        return
-    report["case_details"].update(changes)
-    assess_report(reference_id, report)
 
+    #resume using the existing reference ID and assessment
+    run_clarification_loop(
+        report["reference_id"],
+        report,
+        report["assessment"]
+    )
 
 def run():
     """Run the SafeReport menu."""

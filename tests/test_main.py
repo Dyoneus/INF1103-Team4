@@ -83,9 +83,15 @@ def test_report_needs_clarification(monkeypatch):
         main.io_manager, "display_clarification_questions",
         lambda codes: displayed.update({"codes": codes})
     )
+
+    def fake_collect_clarifications(report_data):
+        displayed["codes"] = report_data["assessment"]["clarification_codes"]
+        return None
+
     monkeypatch.setattr(
-        main.io_manager, "collect_clarifications",
-        lambda report: None
+        main.io_manager,
+        "collect_clarifications",
+        fake_collect_clarifications
     )
 
     #run the workflow
@@ -152,6 +158,12 @@ def test_other_readiness_statuses(
     )
 
     monkeypatch.setattr(
+        main.io_manager,
+        "review_report_before_submission",
+        lambda report: report
+    )
+
+    monkeypatch.setattr(
         main.io_manager, "display_report_reference",
         lambda reference_id: None
     )
@@ -167,9 +179,14 @@ def test_other_readiness_statuses(
         main.io_manager, "display_clarification_questions",
         lambda codes: displayed.update({"codes": codes})
     )
+    def fake_collect_clarifications(report_data):
+        displayed["codes"] = report_data["assessment"]["clarification_codes"]
+        return None
+
     monkeypatch.setattr(
-        main.io_manager, "collect_clarifications",
-        lambda report: None
+        main.io_manager,
+        "collect_clarifications",
+        fake_collect_clarifications
     )
 
     # Simulate original report saving
@@ -211,10 +228,13 @@ def test_other_readiness_statuses(
     )
 
     assert displayed["assessment"]["status"] == expected_status
-    assert displayed["codes"] == expected_codes
+    if expected_codes:
+        assert displayed["codes"] == expected_codes
+    else:
+        assert "codes" not in displayed
 
 
-def test_assess_report_asks_for_clarification_immediately(monkeypatch):
+def test_clarification_loop_reassesses_report(monkeypatch):
     report = {
         "reference_id": "TEST-CASE",
         "case_details": {
@@ -261,7 +281,15 @@ def test_assess_report_asks_for_clarification_immediately(monkeypatch):
 
     monkeypatch.setattr(main.io_manager, "collect_clarifications", fake_collect_clarifications)
 
-    main.assess_report("TEST-CASE", report)
+    assessment = main.assess_report("TEST-CASE", report)
+
+    assert assessment["status"] == "NEEDS_CLARIFICATION"
+
+    main.run_clarification_loop(
+        "TEST-CASE",
+        report,
+        assessment
+    )
 
     assert collected["codes"] == ["CLARIFY_LOCATION"]
     assert report["case_details"]["workplace_location"] == "Block 30, level 3"
@@ -392,3 +420,64 @@ def test_raw_report_save_failure(monkeypatch):
 
     # Verify the correct error was displayed
     assert errors == ["SAVE_FAILED"]
+
+
+def test_clarification_stops_after_two_attempts(monkeypatch):
+    report = {
+        "reference_id": "TEST-001",
+        "case_details": {
+            "description": "An unclear safety observation.",
+            "workplace_location": "A construction site"
+        }
+    }
+
+    assessment = {
+        "status": "NEEDS_CLARIFICATION",
+        "clarification_codes": ["CLARIFY_LOCATION"]
+    }
+
+    reassessment_calls = []
+    saved_updates = []
+
+    # Simulate the user providing a correction each time
+    monkeypatch.setattr(
+        main.io_manager,
+        "collect_clarifications",
+        lambda report: {"workplace_location": "Block A"}
+    )
+
+    # Simulate Data Manager saving corrections
+    def fake_save(reference_id, changes):
+        saved_updates.append(reference_id)
+        return True
+
+    monkeypatch.setattr(
+        main.data_manager,
+        "save_clarifications",
+        fake_save
+    )
+
+    # Simulate AI always requiring clarification
+    def fake_assess(reference_id, report):
+        reassessment_calls.append(reference_id)
+        return assessment.copy()
+
+    monkeypatch.setattr(
+        main,
+        "assess_report",
+        fake_assess
+    )
+
+    monkeypatch.setattr(
+        main.io_manager,
+        "display_clarification_questions",
+        lambda codes: None
+    )
+
+    main.run_clarification_loop(
+        "TEST-001", report, assessment
+    )
+
+    # Exactly two reassessments, never more
+    assert reassessment_calls == ["TEST-001", "TEST-001"]
+    assert saved_updates == ["TEST-001", "TEST-001"]
