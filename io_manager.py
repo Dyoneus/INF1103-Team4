@@ -614,13 +614,3 @@ def collect_clarifications(report):
         print("\nClarification cancelled. No changes saved.")
         return None
     return changes
-
-
-def run() -> None:
-    """Keep the old script command working through the shared application menu."""
-    from main import run as run_application
-    run_application()
-
-
-if __name__ == "__main__":
-    run()
