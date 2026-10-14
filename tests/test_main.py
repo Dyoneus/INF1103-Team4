@@ -367,10 +367,10 @@ def test_save_failure(monkeypatch):
         lambda codes: messages.append(("questions", codes))
     )
 
-    # Run the workflow
+    # run the workflow
     main.process_new_report()
 
-    # Only the save-failure error should be displayed
+    # only the save-failure error should be displayed
     assert messages == [("error", "SAVE_FAILED")]
 
 
@@ -385,13 +385,13 @@ def test_raw_report_save_failure(monkeypatch):
 
     errors = []
 
-    # Simulate user input
+    # simulate user input
     monkeypatch.setattr(
         main.io_manager, "collect_report",
         lambda: report
     )
 
-    # Simulate a file-saving error
+    # simulate a file-saving error
     def fake_create_report(report):
         raise OSError("Simulated file save failure")
 
@@ -400,13 +400,13 @@ def test_raw_report_save_failure(monkeypatch):
         fake_create_report
     )
 
-    # Capture the error code
+    # capture the error code
     monkeypatch.setattr(
         main.io_manager, "display_processing_error",
         lambda code: errors.append(code)
     )
 
-    # AI should not run when saving the raw report fails
+    # ai should not run when saving the raw report fails
     def unexpected_ai_call():
         raise AssertionError("AI should not be called")
 
@@ -415,14 +415,14 @@ def test_raw_report_save_failure(monkeypatch):
         unexpected_ai_call
     )
 
-    # Run the workflow
+    # run the workflow
     main.process_new_report()
 
-    # Verify the correct error was displayed
+    # verify the correct error was displayed
     assert errors == ["SAVE_FAILED"]
 
 
-def test_clarification_stops_after_two_attempts(monkeypatch):
+def test_clarification_stops_at_attempt_limit(monkeypatch):
     report = {
         "reference_id": "TEST-001",
         "case_details": {
@@ -439,14 +439,14 @@ def test_clarification_stops_after_two_attempts(monkeypatch):
     reassessment_calls = []
     saved_updates = []
 
-    # Simulate the user providing a correction each time
+    # simulate the user providing a correction each time
     monkeypatch.setattr(
         main.io_manager,
         "collect_clarifications",
         lambda report: {"workplace_location": "Block A"}
     )
 
-    # Simulate Data Manager saving corrections
+    # simulate Data Manager saving corrections
     def fake_save(reference_id, changes):
         saved_updates.append(reference_id)
         return True
@@ -457,7 +457,7 @@ def test_clarification_stops_after_two_attempts(monkeypatch):
         fake_save
     )
 
-    # Simulate AI always requiring clarification
+    # simulate AI always requiring clarification
     def fake_assess(reference_id, report):
         reassessment_calls.append(reference_id)
         return assessment.copy()
@@ -478,6 +478,8 @@ def test_clarification_stops_after_two_attempts(monkeypatch):
         "TEST-001", report, assessment
     )
 
-    # Exactly two reassessments, never more
-    assert reassessment_calls == ["TEST-001", "TEST-001"]
-    assert saved_updates == ["TEST-001", "TEST-001"]
+    # exactly X reassessments, never more
+    expected_calls = ["TEST-001"] * main.MAX_CLARIFICATION_ATTEMPTS
+
+    assert reassessment_calls == expected_calls
+    assert saved_updates == expected_calls
