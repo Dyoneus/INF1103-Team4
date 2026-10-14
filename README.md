@@ -25,7 +25,7 @@ source .venv/bin/activate
 
 Submitted reports and copied photos are saved under `reports/`. That directory is local application data and is excluded from Git.
 
-Both `python main.py` and `python io_manager.py` open the same menu:
+Both `python main.py` open the same menu:
 
 - **1. Create a new safety report** saves the report and assesses its readiness.
 - **2. Retry a failed assessment** lists failed reports. Select a number or reference ID to retry and update that same report.

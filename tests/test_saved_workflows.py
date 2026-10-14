@@ -178,7 +178,7 @@ def test_menu_dispatches_saved_workflows(monkeypatch):
     assert calls == ["retry", "clarify"]
 
 
-@pytest.mark.parametrize("script", ["main.py", "io_manager.py"])
+@pytest.mark.parametrize("script", ["main.py"])
 def test_script_entrypoints_open_menu(script, tmp_path):
     project = Path(__file__).resolve().parents[1]
     result = subprocess.run(
