@@ -3,6 +3,8 @@ services:
     build: .
     stdin_open: true
     tty: true
+    environment:
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
     volumes:
       - ./reports:/app/reports
       - ./data:/data

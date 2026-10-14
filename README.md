@@ -38,7 +38,7 @@ Clarification answers are saved together before reassessment. Ctrl+C during the 
 
 The interactive application calls AI after saving a new report, retrying a failed assessment, or saving clarification answers. A missing API key leaves the report saved with status `AI_FAILED`, ready to retry after configuration.
 
-For Docker, copy `.env.example` to `.env` and replace `your_groq_api_key_here` with your Groq API key. Docker reads this file when passed `--env-file .env`. Do not commit `.env`.
+For Docker, copy `.env.example` to `.env` and replace `your_groq_api_key_here` with your Groq API key. Docker Compose automatically reads `.env` and passes `GROQ_API_KEY` into the container. Do not commit `.env`.
 
 For local use, `.env` is not loaded automatically. Set the key in the current shell before running `python main.py`:
 
@@ -65,7 +65,7 @@ docker compose build
 docker compose run --rm safereport
 ```
 
-To enable AI assessment, configure `.env` as described above and start with `docker compose run --rm --env-file .env safereport`.
+To enable AI assessment, configure `.env` as described above and run `docker compose run --rm safereport`. Compose passes the key to the app, which calls Groq when a report is submitted. Without a configured key, the app still saves reports but cannot assess them.
 
 The app is interactive. Choose **1. Create a new safety report**, complete the prompts, and let it finish saving before exiting. A report JSON file is created only after a report has been completed and submitted.
 
@@ -85,7 +85,7 @@ If you do not see a new report, check that you ran the command from the reposito
 To run the AI analysis script in Docker, copy `.env.example` to `.env`, set a valid Groq API key, and run:
 
 ```sh
-docker compose run --rm --env-file .env safereport python ai_manager.py
+docker compose run --rm safereport python ai_manager.py
 ```
 
 This AI step is separate from entering a report and requires a valid API key. It reads JSON report files from `reports/` and writes analysis results to `data/ai_output.json`. The report and result directories may contain personal or sensitive data. Keep them private and do not commit them.
