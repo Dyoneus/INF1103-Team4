@@ -94,4 +94,42 @@ class NricValidator(Validator):
         letters = self._CITIZEN_LETTERS if prefix in "ST" else self._FOREIGNER_LETTERS
         return letters[total % 11]
 
-        
+
+class ContactNumberValidator(Validator):
+    """Singapore phone number that matches the chosen contact type.
+ 
+    Mobile numbers start with 8 or 9. Home and office lines start with 6.
+    """
+
+    MOBILE = "Mobile"
+
+    def __init__(self, contact_type: str):
+        self._contact_type = contact_type
+
+    @property
+    def contact_type(self) -> str:
+        return self._contact_type
+
+    def validate(self, text: str) -> list[str]:
+        number = self.clean(text)
+        if not number:
+            return ["EMPTY_CONTACT_NUMBER"]
+        if not re.fullmatch(r"\d{8}", number):
+            return ["INVALID_CONTACT_NUMBER"]
+        if number[0] not in self._allowed_first_digits():
+            return ["WRONG_NUMBER_TYPE"]
+        return []
+
+    def clean(self, text: str) -> str:
+        """Strip spaces, dashes, brackets and a leading +65 / 65."""
+        digits = re.sub(r"[\s\-()]", "", text)
+        if digits.startswith("+65"):
+            digits = digits[3:]
+        elif digits.startswith("65") and len(digits) == 10:
+            digits = digits[2:]
+        return digits
+
+    def _allowed_first_digits(self) -> str:
+        return "89" if self._contact_type == self.MOBILE else "6"
+
+
