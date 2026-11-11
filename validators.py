@@ -54,6 +54,44 @@ class EmailValidator(Validator):
     def clean(self, text: str) -> str:
         return text.strip().lower()
         
-    
+
+class NricValidator(Validator):
+    """Singapore NRIC/FIN.
+ 
+    S/T/F/G numbers are checked against the official checksum letter.
+    M-series FINs are only checked for format.
+    """
+ 
+    _PATTERN = re.compile(r"[STFGM]\d{7}[A-Z]")
+    _WEIGHTS = (2, 7, 6, 5, 4, 3, 2)
+    _CITIZEN_LETTERS = "JZIHGFEDCBA"    # S and T prefixes
+    _FOREIGNER_LETTERS = "XWUTRQPNMLK"  # F and G prefixes
+ 
+    def validate(self, text: str) -> list[str]:
+        value = self.clean(text)
+        if not value:
+            return ["EMPTY_NRIC"]
+        if not self._PATTERN.fullmatch(value):
+            return ["INVALID_NRIC_FORMAT"]
+        if value[0] == "M":
+            return []
+        if value[8] != self._expected_checksum(value):
+            return ["INVALID_NRIC_CHECKSUM"]
+        return []
+ 
+    def clean(self, text: str) -> str:
+        return text.strip().upper()
+ 
+    def _expected_checksum(self, value: str) -> str:
+        """Return the checksum letter an S/T/F/G number should end with."""
+        prefix = value[0]
+        total = sum(
+            int(digit) * weight
+            for digit, weight in zip(value[1:8], self._WEIGHTS)
+        )
+        if prefix in "TG":
+            total += 4
+        letters = self._CITIZEN_LETTERS if prefix in "ST" else self._FOREIGNER_LETTERS
+        return letters[total % 11]
 
         
