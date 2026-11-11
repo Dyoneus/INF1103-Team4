@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-
+import re
 
 class Validator(ABC):
     """Abstract base class for input validators."""
@@ -36,6 +36,24 @@ class RequiredTextValidator(Validator):
         if len(text) > self._max_length:
             return [self._too_long_code]
         return []
+
+
+class EmailValidator(Validator):
+    """Email address with a basic name@domain.tld shape."""
+
+    _PATTERN = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]{2,}")
+
+    def validate(self, text: str) -> list[str]:
+        text = text.strip()
+        if not text:
+            return ["EMPTY_EMAIL"]
+        if not self._PATTERN.fullmatch(text):
+            return ["INVALID_EMAIL"]
+        return []
+
+    def clean(self, text: str) -> str:
+        return text.strip().lower()
+        
     
 
         
