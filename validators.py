@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
 import re
+from datetime import datetime
+from typing import Callable
 
 class Validator(ABC):
     """Abstract base class for input validators."""
@@ -131,5 +133,36 @@ class ContactNumberValidator(Validator):
 
     def _allowed_first_digits(self) -> str:
         return "89" if self._contact_type == self.MOBILE else "6"
+
+
+class IncidentDateTimeValidator(Validator):
+    """Incident date and time in a fixed format, not in the future."""
+
+    def __init__(
+            self,
+            datetime_format: str,
+            clock: Callable[[], datetime] = datetime.now,
+    ):
+        self._format = datetime_format
+        self._clock = clock
+
+    def validate(self, text: str) -> list[str]:
+        if not text.strip():
+            return ["EMPTY_DATETIME"]
+        try:
+            incident = self._parse(text)
+        except ValueError:
+            return ["INVALID_DATETIME"]
+        if incident > self._clock():
+            return ["FUTURE_DATETIME"]
+        return []
+
+    def clean(self, text: str) -> str:
+        """Return the incident time as an ISO string, e.g. 2026-10-09T14:30."""
+        return self._parse(text).isoformat(timespec="minutes")
+
+    def _parse(self, text: str) -> datetime:
+        return datetime.strptime(text.strip(), self._format)
+
 
 
