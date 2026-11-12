@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 import re
 from datetime import datetime
 from typing import Callable
+from pathlib import Path
 
 class Validator(ABC):
     """Abstract base class for input validators."""
@@ -164,5 +165,30 @@ class IncidentDateTimeValidator(Validator):
     def _parse(self, text: str) -> datetime:
         return datetime.strptime(text.strip(), self._format)
 
+
+class PhotoPathValidator(Validator):
+    """Path to an existing photo file with an allowed extension.
+ 
+    Accepts typed or drag-and-dropped paths (surrounding quotes and ~ are handled).
+    """
+    
+    def __init__(self, allowed_types: set[str]):
+        self._allowed_types = {suffix.lower() for suffix in allowed_types}
+
+    def validate(self, text: str) -> list[str]:
+        path = self._to_path(text)
+        if not path.is_file():
+            return ["PHOTO_NOT_FOUND"]
+        if path.suffix.lower() not in self._allowed_types:
+            return ["PHOTO_BAD_TYPE"]
+        return []
+
+    def clean(self, text: str) -> str:
+        """Return the absolute path as a string, so duplicates can be detected."""
+        return str(self._to_path(text).resolve())
+
+    @staticmethod
+    def _to_path(text: str) -> Path:
+        return Path(text.strip().strip("\"'")).expanduser()
 
 
