@@ -1,8 +1,9 @@
 """Terminal input and output for SafeReport"""
 
-import re
-from datetime import datetime
-from pathlib import Path
+from validators import (
+    Validator, RequiredTextValidator, EmailValidator, NricValidator,
+    ContactNumberValidator, IncidentDateTimeValidator, PhotoPathValidator,
+)
 
 MAX_DESCRIPTION_LENGTH = 2000  # The maximum length of a safety report description.
 MAX_NAME_LENGTH = 100
@@ -31,15 +32,29 @@ ERROR_MESSAGES = {
     "EMPTY_WORKPLACE_NAME": "Workplace name cannot be empty.",
     "PHOTO_NOT_FOUND": "File not found. Check the path and try again.",
     "PHOTO_BAD_TYPE": "Only .jpg, .jpeg and .png photos are accepted.",
+    "EMPTY_DATETIME": f"Date and time cannot be empty. Use {DATETIME_HINT}.",
     "INVALID_DATETIME": "Invalid format. Use YYYY-MM-DD HH:MM, e.g. 2026-10-09 14:30.",
     "FUTURE_DATETIME": "The incident cannot be in the future.",
     "EMPTY_EMAIL": "Email cannot be empty.",
     "INVALID_EMAIL": "That doesn't look like a valid email address.",
+    "EMPTY_NRIC": "NRIC/FIN cannot be empty.",
     "INVALID_NRIC_FORMAT": "Enter a valid NRIC/FIN, e.g. S1234567D.",
     "INVALID_NRIC_CHECKSUM": "That NRIC/FIN is not valid. Please check the last letter.",
+    "EMPTY_CONTACT_NUMBER": "Contact number cannot be empty.",
     "INVALID_CONTACT_NUMBER": "Enter an 8-digit Singapore number (optionally with +65).",
     "WRONG_NUMBER_TYPE": "That number doesn't match the contact type you chose.",
 }
+
+
+#Validator Objects
+DESCRIPTION_VALIDATOR = RequiredTextValidator(MAX_DESCRIPTION_LENGTH, "EMPTY_DESCRIPTION", "DESCRIPTION_TOO_LONG")
+LOCATION_VALIDATOR = RequiredTextValidator(MAX_LOCATION_LENGTH, "EMPTY_LOCATION", "LOCATION_TOO_LONG")
+WORKPLACE_NAME_VALIDATOR = RequiredTextValidator(MAX_NAME_LENGTH, "EMPTY_WORKPLACE_NAME", "NAME_TOO_LONG")
+PERSON_NAME_VALIDATOR = RequiredTextValidator(MAX_NAME_LENGTH, "EMPTY_NAME", "NAME_TOO_LONG")
+EMAIL_VALIDATOR = EmailValidator()
+NRIC_VALIDATOR = NricValidator()
+DATETIME_VALIDATOR = IncidentDateTimeValidator(DATETIME_FORMAT)
+PHOTO_VALIDATOR = PhotoPathValidator(ALLOWED_PHOTO_TYPES)
 
 
 """Menu func starts here"""
@@ -80,7 +95,7 @@ def ask(prompt: str) -> str:
     return input(prompt).strip()
 
 
-def ask_until_valid(prompt: str, validate, optional: bool = False) -> str | None:
+def ask_until_valid(prompt: str, validator: Validator, optional: bool = False) -> str | None:
     """Keep asking until validate(value) returns no error codes.
 
     If optional is True, a blank answer returns None.
@@ -91,9 +106,9 @@ def ask_until_valid(prompt: str, validate, optional: bool = False) -> str | None
         if optional and not value:
             return None
 
-        errors = validate(value)
+        errors = validator.validate(value)
         if not errors:
-            return value
+            return validator.clean(value)
 
         for error in errors:
             print(ERROR_MESSAGES.get(error, "Invalid input."))
@@ -137,144 +152,13 @@ def get_report_text() -> str | None:
             print("\nReport entry cancelled.")
             return None
 
-        errors = validate_report_text(description, MAX_DESCRIPTION_LENGTH)
+        errors = DESCRIPTION_VALIDATOR.validate(description)
 
         if not errors:
             return description
 
         for error in errors:
             print(ERROR_MESSAGES[error])
-
-
-"""Validation checks"""
-def validate_report_text(text: str, max_chars: int) -> list[str]:
-    """If error, return error codes for blank & over-length descriptions."""
-    text = text.strip()
-    errors = []
-
-    if not text:
-        errors.append("EMPTY_DESCRIPTION")
-
-    if len(text) > max_chars:
-        errors.append("DESCRIPTION_TOO_LONG")
-
-    return errors
-
-
-def validate_location(text: str) -> list[str]:
-    """Return error codes for a blank or over-length location."""
-    text = text.strip()
-    if not text:
-        return ["EMPTY_LOCATION"]
-    if len(text) > MAX_LOCATION_LENGTH:
-        return ["LOCATION_TOO_LONG"]
-    return []
-
-
-def validate_workplace_name(text: str) -> list[str]:
-    """Return error codes for a blank or over-length workplace/contractor name."""
-    text = text.strip()
-    if not text:
-        return ["EMPTY_WORKPLACE_NAME"]
-    if len(text) > MAX_NAME_LENGTH:
-        return ["NAME_TOO_LONG"]
-    return []
-
-
-def validate_person_name(text: str) -> list[str]:
-    """Return error codes for a blank or over-length personal name."""
-    text = text.strip()
-    if not text:
-        return ["EMPTY_NAME"]
-    if len(text) > MAX_NAME_LENGTH:
-        return ["NAME_TOO_LONG"]
-    return []
-
-
-def clean_path(text: str) -> Path:
-    """Turn typed or drag-and-dropped text into a Path (strips quotes, expands ~)."""
-    return Path(text.strip().strip("\"'")).expanduser()
-
-
-def validate_photo_path(text: str) -> list[str]:
-    """Return error codes if the path isn't an existing .jpg/.jpeg/.png file."""
-    path = clean_path(text)
-    if not path.is_file():
-        return ["PHOTO_NOT_FOUND"]
-    if path.suffix.lower() not in ALLOWED_PHOTO_TYPES:
-        return ["PHOTO_BAD_TYPE"]
-    return []
-
-
-def validate_incident_datetime(text: str) -> list[str]:
-    """Return error codes for a badly formatted or future date/time."""
-    try:
-        incident = datetime.strptime(text.strip(), DATETIME_FORMAT)
-    except ValueError:
-        return ["INVALID_DATETIME"]
-    if incident > datetime.now():
-        return ["FUTURE_DATETIME"]
-    return []
-
-
-def validate_email(text: str) -> list[str]:
-    """Return error codes for a blank or badly formatted email."""
-    text = text.strip()
-    if not text:
-        return ["EMPTY_EMAIL"]
-    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]{2,}", text):
-        return ["INVALID_EMAIL"]
-    return []
-
-
-def validate_nric(text: str) -> list[str]:
-    """Return error codes for an invalid Singapore NRIC/FIN.
-
-    S/T/F/G numbers are checked against the official checksum letter.
-    M-series FINs are only checked for format.
-    """
-    value = text.strip().upper()
-    if not re.fullmatch(r"[STFGM]\d{7}[A-Z]", value):
-        return ["INVALID_NRIC_FORMAT"]
-
-    prefix = value[0]
-    if prefix == "M":
-        return []
-
-    weights = (2, 7, 6, 5, 4, 3, 2)
-    total = sum(int(digit) * weight for digit, weight in zip(value[1:8], weights))
-    if prefix in "TG":
-        total += 4
-
-    checksum_letters = "JZIHGFEDCBA" if prefix in "ST" else "XWUTRQPNMLK"
-    if value[8] != checksum_letters[total % 11]:
-        return ["INVALID_NRIC_CHECKSUM"]
-    return []
-
-
-def normalise_phone(text: str) -> str:
-    """Strip spaces, dashes and a leading +65 / 65 from a phone number."""
-    digits = re.sub(r"[\s\-()]", "", text)
-    if digits.startswith("+65"):
-        digits = digits[3:]
-    elif digits.startswith("65") and len(digits) == 10:
-        digits = digits[2:]
-    return digits
-
-
-def validate_contact_number(text: str, contact_type: str) -> list[str]:
-    """Return error codes for a Singapore number that doesn't fit its type.
-
-    Mobile numbers start with 8 or 9. Home and office lines start with 6.
-    """
-    number = normalise_phone(text)
-    if not re.fullmatch(r"\d{8}", number):
-        return ["INVALID_CONTACT_NUMBER"]
-
-    allowed_first_digits = "89" if contact_type == "Mobile" else "6"
-    if number[0] not in allowed_first_digits:
-        return ["WRONG_NUMBER_TYPE"]
-    return []
 
 
 """Collect each section of the report"""
@@ -289,13 +173,13 @@ def get_photos() -> list[str]:
         if not text:
             break
 
-        errors = validate_photo_path(text)
+        errors = PHOTO_VALIDATOR.validate(text)
         if errors:
             for error in errors:
                 print(ERROR_MESSAGES[error])
             continue
 
-        resolved = str(clean_path(text).resolve())
+        resolved = PHOTO_VALIDATOR.clean(text)
         if resolved in photos:
             print("You already added that photo.")
             continue
@@ -308,7 +192,7 @@ def get_photos() -> list[str]:
 def get_verified_email() -> str:
     """Ask for an email twice and return it once both entries match."""
     while True:
-        email = ask_until_valid("Email: ", validate_email).lower()
+        email = ask_until_valid("Email: ", EMAIL_VALIDATOR)
         confirm = ask("Re-enter email to verify: ").lower()
 
         if email == confirm:
@@ -321,9 +205,9 @@ def get_contact_number() -> tuple[str, str]:
     contact_type = ask_choice("\nContact number type:", CONTACT_TYPES)
     number = ask_until_valid(
         f"{contact_type} number: ",
-        lambda value: validate_contact_number(value, contact_type),
+        ContactNumberValidator(contact_type),
     )
-    return contact_type, normalise_phone(number)
+    return contact_type, number
 
 
 def collect_case_details() -> dict | None:
@@ -342,12 +226,12 @@ def collect_case_details() -> dict | None:
     print()
     workplace_name = ask_until_valid(
         "Workplace name: ",
-        validate_workplace_name,
+        WORKPLACE_NAME_VALIDATOR,
     )
-    location = ask_until_valid("Workplace location: ", validate_location)
-    incident_text = ask_until_valid(
+    location = ask_until_valid("Workplace location: ", LOCATION_VALIDATOR)
+    incident_datetime = ask_until_valid(
         f"Date and time of incident ({DATETIME_HINT}): ",
-        validate_incident_datetime,
+        DATETIME_VALIDATOR,
     )
     profile = ask_choice("\nYour profile (your relationship to the workplace):", REPORTER_PROFILES)
 
@@ -357,7 +241,7 @@ def collect_case_details() -> dict | None:
         "consent_for_image_use": consent,
         "workplace_name": workplace_name,
         "workplace_location": location,
-        "incident_datetime": datetime.strptime(incident_text, DATETIME_FORMAT).isoformat(timespec="minutes"),
+        "incident_datetime": incident_datetime,
         "reporter_profile": profile,
     }
 
@@ -365,9 +249,9 @@ def collect_case_details() -> dict | None:
 def collect_contact_details() -> dict:
     """Collect the reporter's contact details."""
     print("\nEnter your contact details:")
-    name = ask_until_valid("Name: ", validate_person_name)
+    name = ask_until_valid("Name: ", PERSON_NAME_VALIDATOR)
     email = get_verified_email()
-    nric = ask_until_valid("NRIC/FIN: ", validate_nric).upper()
+    nric = ask_until_valid("NRIC/FIN: ", NRIC_VALIDATOR)
     contact_type, contact_number = get_contact_number()
 
     return {
@@ -599,17 +483,14 @@ def collect_clarifications(report):
         if "ADD_LOCATION" in codes or "CLARIFY_LOCATION" in codes:
             print(f"\nCurrent location: {details.get('workplace_location', '')}")
             changes["workplace_location"] = ask_until_valid(
-                "Updated workplace location: ", validate_location
+                "Updated workplace location: ", LOCATION_VALIDATOR
             )
         if "ADD_DATE" in codes or "ADD_TIME" in codes:
             print(f"\nCurrent date/time: {details.get('incident_datetime', '')}")
-            value = ask_until_valid(
+            changes["incident_datetime"] = ask_until_valid(
                 f"Date and time of incident ({DATETIME_HINT}): ",
-                validate_incident_datetime,
+                DATETIME_VALIDATOR,
             )
-            changes["incident_datetime"] = datetime.strptime(
-                value, DATETIME_FORMAT
-            ).isoformat(timespec="minutes")
     except (EOFError, KeyboardInterrupt):
         print("\nClarification cancelled. No changes saved.")
         return None

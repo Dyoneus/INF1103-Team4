@@ -1,4 +1,3 @@
-from io_manager import validate_report_text
 import io_manager
 
 def test_review_report_before_submission_allows_edits(monkeypatch, capsys):
@@ -74,21 +73,8 @@ def test_get_report_text_reprompts_for_blank_input(monkeypatch, capsys):
     output = capsys.readouterr().out
     assert output.count("Description cannot be empty.") == 2
 
-def test_blank_description():
-    assert validate_report_text("", 2000) == ["EMPTY_DESCRIPTION"]
-    assert validate_report_text("   ", 2000) == ["EMPTY_DESCRIPTION"]
 
-def test_short_description_is_accepted():
-    assert validate_report_text("Loose wire.", 2000) == []
 
-def test_description_length_boundary():
-    assert validate_report_text("abcde", 5) == []
-    assert validate_report_text("abcdef", 5) == [
-        "DESCRIPTION_TOO_LONG"
-    ]
-
-def test_surrounding_spaces_are_ignored():
-    assert validate_report_text("  abcde  ", 5) == []
 
 def test_display_clarification_questions(capsys):
     codes = ["CLARIFY_LOCATION", "ADD_TIME"]
