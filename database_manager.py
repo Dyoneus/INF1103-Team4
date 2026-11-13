@@ -96,3 +96,21 @@ class DatabaseManager:
         except (sqlite3.Error, json.JSONDecodeError, TypeError, ValueError) as error:
             print("Failed to update report:", error)
             return False
+
+    
+    def delete_report(self, reference_id):
+        try:
+            with sqlite3.connect(self.database_path) as connection:
+                cursor = connection.execute("""
+                    DELETE FROM reports
+                    WHERE reference_id = ?
+                """, (reference_id,))
+
+                if cursor.rowcount == 0:
+                    return False
+
+            return True
+
+        except (sqlite3.Error, TypeError, ValueError) as error:
+            print("Failed to delete report:", error)
+            return False
