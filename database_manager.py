@@ -1,5 +1,6 @@
 import sqlite3
 from pathlib import Path
+import json
 
 class DatabaseManager:
     def __init__(self, database_path = "data/safereport.db"):
@@ -21,4 +22,21 @@ class DatabaseManager:
 
         except(sqlite3.Error, OSError) as error:
             print("Database initialization failed:", error)
+            return False
+
+
+    def create_report(self, report):
+        try:
+            reference_id = report["reference_id"]
+            report_data = json.dumps(report)
+
+            with sqlite3.connect(self.database_path) as connection:
+                connection.execute("""
+                    INSERT INTO reports (reference_id, report_data)
+                    VALUES (?, ?)
+                """, (reference_id, report_data))
+            return True
+
+        except(KeyError, TypeError, ValueError, sqlite3.Error) as error:
+            print("Failed to create report:", error)
             return False
