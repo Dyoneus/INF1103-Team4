@@ -40,3 +40,24 @@ class DatabaseManager:
         except(KeyError, TypeError, ValueError, sqlite3.Error) as error:
             print("Failed to create report:", error)
             return False
+
+
+    def load_reports(self):
+        try:
+            with sqlite3.connect(self.database_path) as connection:
+                cursor = connection.execute("""
+                    SELECT report_data FROM reports
+                """)
+                rows = cursor.fetchall()
+
+            reports = []
+
+            for row in rows:
+                report = json.loads(row[0])
+                reports.append(report)
+
+            return reports
+        
+        except(sqlite3.Error, json.JSONDecodeError, TypeError) as error:
+            print("Failed to load reports:", error)
+            return None
