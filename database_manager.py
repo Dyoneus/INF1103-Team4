@@ -61,3 +61,38 @@ class DatabaseManager:
         except(sqlite3.Error, json.JSONDecodeError, TypeError) as error:
             print("Failed to load reports:", error)
             return None
+
+
+    def update_report(self, reference_id, updated_data):
+        try:
+            if not isinstance(updated_data, dict):
+                return False
+
+            with sqlite3.connect(self.database_path) as connection:
+                cursor = connection.execute("""
+                    SELECT report_data FROM reports
+                    WHERE reference_id = ?
+                """, (reference_id,))
+
+                row = cursor.fetchone()
+
+                if row is None:
+                    return False
+
+                report = json.loads(row[0])
+                report.update(updated_data)
+
+                if report.get("reference_id") != reference_id:
+                    return False
+
+                connection.execute("""
+                    UPDATE reports
+                    SET report_data = ?
+                    WHERE reference_id = ?
+                """, (json.dumps(report), reference_id))
+
+            return True
+
+        except (sqlite3.Error, json.JSONDecodeError, TypeError, ValueError) as error:
+            print("Failed to update report:", error)
+            return False
