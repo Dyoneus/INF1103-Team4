@@ -114,3 +114,26 @@ class DatabaseManager:
         except (sqlite3.Error, TypeError, ValueError) as error:
             print("Failed to delete report:", error)
             return False
+
+
+    def filter_by_status(self, status):
+        try:
+            reports = self.load_reports()
+
+            if reports is None:
+                return None
+
+            filtered_reports = []
+
+            for report in reports:
+                assessment =report.get("assessment", {})
+
+                if assessment.get("status") == status:
+                    filtered_reports.append(report)
+
+            return filtered_reports
+
+        except(AttributeError, TypeError) as error:
+            print("Failed to filter reports:", error)
+            return None
+        
