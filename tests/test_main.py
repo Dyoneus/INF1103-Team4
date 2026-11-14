@@ -458,12 +458,12 @@ def test_clarification_stops_at_attempt_limit(monkeypatch):
     )
 
     # simulate AI always requiring clarification
-    def fake_assess(reference_id, report):
+    def fake_assess(self, reference_id, report):
         reassessment_calls.append(reference_id)
         return assessment.copy()
 
     monkeypatch.setattr(
-        main,
+        main.SafeReportApplication,
         "assess_report",
         fake_assess
     )
