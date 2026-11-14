@@ -77,6 +77,7 @@ def test_retry_updates_original_record(tmp_path, monkeypatch):
     for field in ("case_details", "reporter", "submitted_at"):
         assert result[field] == original[field]
     assert len(list(tmp_path.glob("*.json"))) == 1
+    assert data_manager.manager.database.load_reports() == [result]
 
 
 def test_clarification_saves_before_ai_and_reassesses(tmp_path, monkeypatch):
