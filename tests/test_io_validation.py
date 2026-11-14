@@ -1,44 +1,69 @@
+"""Tests for ConsolePrompter working with the Validator interface."""
+
+import pytest
+
 import io_manager
-from validators import EmailValidator
+from io_manager import ConsolePrompter
+from validators import (
+    Validator, RequiredTextValidator, EmailValidator, NricValidator,
+    ContactNumberValidator, IncidentDateTimeValidator,
+)
 
 
-def fake_inputs(monkeypatch, answers):
+def make_prompter(answers):
     answers = list(answers)
-    monkeypatch.setattr("builtins.input", lambda prompt="": answers.pop(0))
-    return answers
+    shown = []
+    prompter = ConsolePrompter(
+        io_manager.ERROR_MESSAGES,
+        input_fn=lambda prompt: answers.pop(0),
+        output_fn=lambda text="": shown.append(text),
+    )
+    return prompter, answers, shown
 
 
-def test_ask_until_valid_reprompts_then_returns_cleaned_value(monkeypatch, capsys):
-    remaining = fake_inputs(monkeypatch, ["not-an-email", "  Ali@Mail.COM "])
+class PostalCodeValidator(Validator):
+    """A validator the I/O Manager has never seen, to show any subclass can be used."""
 
-    result = io_manager.ask_until_valid("Email: ", EmailValidator())
+    def validate(self, text):
+        return [] if text.strip().isdigit() and len(text.strip()) == 6 else ["INVALID_POSTAL_CODE"]
 
-    assert result == "ali@mail.com"
+
+def test_ask_until_valid_reprompts_then_returns_cleaned_value():
+    prompter, remaining, shown = make_prompter(["not-an-email", "  Ali@Mail.COM "])
+
+    assert prompter.ask_until_valid("Email: ", EmailValidator()) == "ali@mail.com"
     assert remaining == []
-    assert "valid email" in capsys.readouterr().out
+    assert any("valid email" in line for line in shown)
 
 
-def test_collect_contact_details_returns_cleaned_values(monkeypatch, capsys):
-    fake_inputs(monkeypatch, [
-        "Ali",                                  # name
-        "Ali@Mail.com", "ali@mail.com",         # email + confirm
-        "s1234567a", "s1234567d",               # bad checksum, then valid NRIC
-        "2",                                    # contact type: Mobile
-        "61234567", "+65 9123-4567",            # landline rejected, then mobile
-    ])
+@pytest.mark.parametrize("validator, bad, good, expected", [
+    (RequiredTextValidator(10, "EMPTY_NAME", "NAME_TOO_LONG"), "   ", " Ali ", "Ali"),
+    (EmailValidator(), "ali@", "ALI@MAIL.COM", "ali@mail.com"),
+    (NricValidator(), "S1234567A", "s1234567d", "S1234567D"),
+    (ContactNumberValidator("Office"), "91234567", "6123 4567", "61234567"),
+    (IncidentDateTimeValidator("%Y-%m-%d %H:%M"), "yesterday", "2020-01-02 09:30", "2020-01-02T09:30"),
+    (PostalCodeValidator(), "12AB", " 123456 ", "123456"),
+])
+def test_ask_until_valid_works_with_any_validator(validator, bad, good, expected):
+    """LSP: every Validator subclass can be substituted without changing ask_until_valid."""
+    prompter, remaining, _ = make_prompter([bad, good])
 
-    details = io_manager.collect_contact_details()
+    assert prompter.ask_until_valid("Value: ", validator) == expected
+    assert remaining == []
 
-    assert details == {
-        "name": "Ali",
-        "email": "ali@mail.com",
-        "nric_fin": "S1234567D",
-        "contact_type": "Mobile",
-        "contact_number": "91234567",
-    }
-    output = capsys.readouterr().out
-    assert "check the last letter" in output
-    assert "doesn't match the contact type" in output
+
+def test_optional_prompt_returns_none_for_blank_answer():
+    prompter, _, _ = make_prompter([""])
+
+    assert prompter.ask_until_valid("Optional: ", EmailValidator(), optional=True) is None
+
+
+def test_unknown_error_code_shows_generic_message():
+    prompter, _, shown = make_prompter(["12AB", "123456"])
+
+    prompter.ask_until_valid("Postal code: ", PostalCodeValidator())
+
+    assert "Invalid input." in shown
 
 
 def test_every_error_code_has_a_message():
