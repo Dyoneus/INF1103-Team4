@@ -11,7 +11,7 @@ import data_manager
 MAX_CLARIFICATION_ATTEMPTS = 5 #to prevent recursion (if the user keeps giving info and groq keeps returning NEEDS_CLARIFICATION)
 
 class SafeReportApplication:
-    """Coordinate application workflows through supplied managers."""
+    #coordinate application workflows through supplied managers
 
     def __init__(
         self,
@@ -26,7 +26,7 @@ class SafeReportApplication:
         self._data = data_manager
 
     def handle_ai_failure(self, reference_id, error_code):
-        """Save an AI failure and inform the user."""
+        #save an AI failure and inform the user
         ai_result = self._ai.make_result(
             reference_id, error=error_code
         )
@@ -42,9 +42,60 @@ class SafeReportApplication:
 
         self._io.display_processing_error(error_code)
 
+    def assess_report(self, reference_id, report):
+        #assess a saved report using the supplied managers
+        try:
+            client = self._ai.get_client()
+        except RuntimeError:
+            self.handle_ai_failure(reference_id, "CONFIG_MISSING")
+            return
+
+        case_details = report["case_details"]
+
+        incident_data = {
+            key: value
+            for key, value in case_details.items()
+            if key != "photos"
+        }
+
+        if case_details.get("consent_for_image_use") is True:
+            photo_paths = case_details.get("photos", [])
+        else:
+            photo_paths = []
+
+        try:
+            ai_fields = self._ai.analyze_incident(
+                client, incident_data, photo_paths
+            )
+        except RuntimeError:
+            self.handle_ai_failure(reference_id, "AI_FAILED")
+            return
+
+        ai_result = self._ai.make_result(
+            reference_id, fields=ai_fields
+        )
+
+        assessment = self._logic.determine_report_status(ai_result)
+
+        if assessment["status"] == "AI_FAILED":
+            self.handle_ai_failure(reference_id, "INVALID_SCHEMA")
+            return
+
+        saved = self._data.save_report(
+            reference_id, ai_result, assessment
+        )
+
+        if not saved:
+            self._io.display_processing_error("SAVE_FAILED")
+            return
+
+        self._io.display_assessment_result(assessment)
+        return assessment
+
 
 def handle_ai_failure(reference_id, error_code):
-    """Bridge existing workflows to the application during migration."""
+    #bridges existing workflows to the application during migration
+
     application = SafeReportApplication(
         io_manager=io_manager,
         ai_manager=ai_manager,
@@ -84,61 +135,14 @@ def process_new_report():
 
 
 def assess_report(reference_id, report):
-    """Assess an existing record and replace its saved AI and logic results."""
-    # initialise the AI client
-    try:
-        client = ai_manager.get_client()
-    except RuntimeError:
-        handle_ai_failure(reference_id, "CONFIG_MISSING")
-        return
-
-    # prepare incident information for the AI
-    case_details = report["case_details"]
-
-    incident_data = {
-        key: value
-        for key, value in case_details.items()
-        if key != "photos"
-    }
-
-    if case_details.get("consent_for_image_use") is True:
-        photo_paths = case_details.get("photos", [])
-    else:
-        photo_paths = []
-
-    # analyse the incident
-    try:
-        ai_fields = ai_manager.analyze_incident(
-            client, incident_data, photo_paths
-        )
-    except RuntimeError:
-        handle_ai_failure(reference_id, "AI_FAILED")
-        return
-
-    ai_result = ai_manager.make_result(
-        reference_id, fields=ai_fields
+    #bridge existing workflows to the application during migration
+    application = SafeReportApplication(
+        io_manager=io_manager,
+        ai_manager=ai_manager,
+        logic_manager=logic_manager,
+        data_manager=data_manager,
     )
-
-    # determine report readiness
-    assessment = logic_manager.determine_report_status(ai_result)
-
-    if assessment["status"] == "AI_FAILED":
-        handle_ai_failure(reference_id, "INVALID_SCHEMA")
-        return
-
-    # save AI and Logic results
-    saved = data_manager.save_report(
-        reference_id, ai_result, assessment
-    )
-
-    if not saved:
-        io_manager.display_processing_error("SAVE_FAILED")
-        return
-
-    #display the assessment and return it
-    io_manager.display_assessment_result(assessment)
-
-    return assessment
+    return application.assess_report(reference_id, report)
 
 
 def run_clarification_loop(reference_id, report, assessment):
