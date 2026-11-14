@@ -13,30 +13,62 @@ class DataManager:
             database = DatabaseManager()
 
         self.database = database
+        self.database_ready = self.database.initialize_database()
 
-    def load_reports(self):
+    def migrate_reports(self):
+        if not self.database_ready:
+            return False
+
         if not REPORTS_DIR.exists():
-            return []
+            return True
 
         if not REPORTS_DIR.is_dir():
-            return None
+            return False
 
-        reports = []
+        existing_reports = self.database.load_reports()
+
+        if existing_reports is None:
+            return False
+
+        existing_ids = {
+            report["reference_id"]
+            for report in existing_reports
+        }
 
         try:
-            for reports_path in sorted(REPORTS_DIR.glob("*.json")):
-                with reports_path.open("r", encoding="utf-8") as file:
+            for report_path in sorted(REPORTS_DIR.glob("*.json")):
+                with report_path.open("r", encoding="utf-8") as file:
                     report = json.load(file)
 
                 if not isinstance(report, dict):
-                    return None
+                    return False
 
-                reports.append(report)
+                reference_id = report.get("reference_id")
 
-            return reports
+                if not isinstance(reference_id, str):
+                    return False
 
-        except (OSError, json.JSONDecodeError, UnicodeError):
+                if reference_id != report_path.stem:
+                    return False
+
+                if reference_id not in existing_ids:
+                    if not self.database.create_report(report):
+                        return False
+
+                    existing_ids.add(reference_id)
+
+            return True
+
+        except (OSError, json.JSONDecodeError, UnicodeError, KeyError, TypeError):
+            return False
+
+        
+    def load_reports(self):
+        if not self.database_ready:
+            print("SQLite database is not ready.")
             return None
+
+        return self.database.load_reports()
 
 
     def filter_by_status(self, status):
@@ -62,8 +94,27 @@ class DataManager:
 
 
     def create_report(self, report):
-        """Save a new raw report and return its file path."""
-        return save_raw_report(report)
+        """Save a new report to JSON and SQLite."""
+        report_path = save_raw_report(report)
+
+        if not report_path:
+            return report_path
+
+        try:
+            with Path(report_path).open("r", encoding="utf-8") as file:
+                saved_report = json.load(file)
+        except(OSError, json.JSONDecodeError):
+            return None
+
+        if not self.database_ready:
+            print("SQLite database is not ready.")
+            return None
+
+        if not self.database.create_report(saved_report):
+            print("Warning: Report saved to JSON but not SQLite.")
+            return None
+
+        return report_path
 
 
     def update_report(self, reference_id, updated_data, case_changes=None):
@@ -125,7 +176,19 @@ class DataManager:
 
             report.update(updated_data)
 
-            return self._write_report(report_path, report)
+            if not self.database_ready:
+                print("SQLite database is not ready.")
+                return False
+
+            if not self.database.update_report(reference_id, report):
+                print("Failed to update report in SQLite.")
+                return False
+
+            if not self._write_report(report_path, report):
+                print("Failed to update report in JSON.")
+                return False
+
+            return True
 
         except (OSError, json.JSONDecodeError, UnicodeError):
             return False
