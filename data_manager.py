@@ -61,15 +61,13 @@ class DataManager:
 
         except (OSError, json.JSONDecodeError, UnicodeError, KeyError, TypeError):
             return False
-
-        
+    
     def load_reports(self):
-        if not self.database_ready:
-            print("SQLite database is not ready.")
-            return None
+           # Import legacy JSON reports before reading SQLite."""
+            if not self.migrate_reports():
+                return None
 
-        return self.database.load_reports()
-
+            return self.database.load_reports()
 
     def filter_by_status(self, status):
         reports = self.load_reports()
@@ -94,35 +92,29 @@ class DataManager:
 
 
     def create_report(self, report):
-        """Save a new report to JSON and SQLite."""
-
+        # save to JSON and SQLite. Raise OSError on failure
         if not self.database_ready:
-            print("SQLite database is not ready.")
-            return None
-
-        report_path = None
+            raise OSError("SQLite database is not ready.")
 
         try:
             report_path = save_raw_report(report)
 
             if not report_path:
-                return None
+                raise OSError("No report path was returned.")
 
             with Path(report_path).open("r", encoding="utf-8") as file:
                 saved_report = json.load(file)
 
             if not self.database.create_report(saved_report):
-                print("Failed to save report to SQLite.")
-
-                # Keep JSON and photos for recovery.
-                print("JSON report retained for recovery:", report_path)
-                return None
+                # Preserve JSON and photos for recovery.
+                raise OSError(
+                    "SQLite save failed; JSON retained for recovery."
+                )
 
             return report_path
 
-        except (OSError, json.JSONDecodeError, TypeError, KeyError) as error:
-            print("Failed to create report:", error)
-            return None
+        except (OSError, json.JSONDecodeError, UnicodeError, TypeError, KeyError) as error:
+            raise OSError("Could not save the report.") from error
 
 
     def update_report(self, reference_id, updated_data, case_changes=None):
