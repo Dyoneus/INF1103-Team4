@@ -188,19 +188,39 @@ class DataManager:
                 print("SQLite database is not ready.")
                 return False
 
+            # Keep the original SQLite report for recovery.
+            existing_reports = self.database.load_reports()
+
+            if existing_reports is None:
+                return False
+
+            original_report = None
+
+            for existing_report in existing_reports:
+                if existing_report.get("reference_id") == reference_id:
+                    original_report = existing_report
+                    break
+
+            if original_report is None:
+                return False
+
             if not self.database.update_report(reference_id, report):
                 print("Failed to update report in SQLite.")
                 return False
 
             if not self._write_report(report_path, report):
                 print("Failed to update report in JSON.")
+
+                # Restore the previous SQLite report.
+                if not self.database.replace_report(reference_id, original_report):
+                    print("Warning: SQLite rollback failed.")
+
                 return False
 
             return True
 
         except (OSError, json.JSONDecodeError, UnicodeError):
             return False
-
 
     def _write_report(self, report_path, report):
         temp_file = None

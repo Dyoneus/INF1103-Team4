@@ -158,3 +158,30 @@ class DatabaseManager:
         except (AttributeError, TypeError) as error:
             print("Failed to filter reports by location:", error)
             return None
+
+
+
+    def replace_report(self, reference_id, report):
+        """Replace the entire report in SQLite for recovery."""
+        try:
+            if not isinstance(report, dict):
+                return False
+
+            if report.get("reference_id") != reference_id:
+                return False
+
+            with sqlite3.connect(self.database_path) as connection:
+                cursor = connection.execute("""
+                    UPDATE reports
+                    SET report_data = ?
+                    WHERE reference_id = ?
+                """, (json.dumps(report), reference_id))
+
+                if cursor.rowcount == 0:
+                    return False
+
+            return True
+
+        except (sqlite3.Error, TypeError, ValueError) as error:
+            print("Failed to replace report:", error)
+            return False
