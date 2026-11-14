@@ -525,3 +525,112 @@ def test_existing_creation_function_delegates(monkeypatch):
         data_manager=main.data_manager,
     )
     application_class.return_value.process_new_report.assert_called_once_with()
+
+@pytest.fixture
+def retry_setup(assessment_setup):
+    application, io, ai, logic, data, report = assessment_setup
+
+    report["reference_id"] = "RETRY-001"
+    report["assessment"] = {
+        "status": "AI_FAILED",
+        "clarification_codes": [],
+    }
+
+    data.get_failed_ai_reports.return_value = [report]
+    io.select_saved_report.return_value = report
+
+    application.assess_report = Mock(return_value={
+        "status": "NEEDS_CLARIFICATION",
+        "clarification_codes": ["CLARIFY_LOCATION"],
+    })
+    application.run_clarification_loop = Mock()
+
+    return application, io, data, report
+
+
+def test_retry_assesses_selected_record_without_creating_another(
+    retry_setup
+):
+    application, io, data, report = retry_setup
+    reports = [{"reference_id": "OTHER-001"}, report]
+    data.get_failed_ai_reports.return_value = reports
+    assessment = application.assess_report.return_value
+
+    events = Mock()
+    events.attach_mock(data, "data")
+    events.attach_mock(io, "io")
+    events.attach_mock(application.assess_report, "assess")
+    events.attach_mock(application.run_clarification_loop, "clarify")
+
+    application.retry_failed_report()
+
+    assert events.mock_calls == [
+        call.data.get_failed_ai_reports(),
+        call.io.select_saved_report(reports),
+        call.assess("RETRY-001", report),
+        call.clarify("RETRY-001", report, assessment),
+    ]
+    data.create_report.assert_not_called()
+
+
+def test_retry_load_failure_stops_before_selection(retry_setup):
+    application, io, data, report = retry_setup
+    data.get_failed_ai_reports.return_value = None
+
+    application.retry_failed_report()
+
+    io.display_processing_error.assert_called_once_with("LOAD_FAILED")
+    io.select_saved_report.assert_not_called()
+    application.assess_report.assert_not_called()
+    application.run_clarification_loop.assert_not_called()
+    data.create_report.assert_not_called()
+
+
+@pytest.mark.parametrize("has_reports", [False, True])
+def test_retry_no_selection_stops_without_assessment(
+    retry_setup, has_reports
+):
+    application, io, data, report = retry_setup
+    reports = [report] if has_reports else []
+    data.get_failed_ai_reports.return_value = reports
+    io.select_saved_report.return_value = None
+
+    application.retry_failed_report()
+
+    io.select_saved_report.assert_called_once_with(reports)
+    io.display_processing_error.assert_not_called()
+    application.assess_report.assert_not_called()
+    application.run_clarification_loop.assert_not_called()
+    data.create_report.assert_not_called()
+
+
+def test_retry_failed_assessment_does_not_start_clarification(
+    retry_setup
+):
+    application, io, data, report = retry_setup
+    application.assess_report.return_value = None
+
+    application.retry_failed_report()
+
+    application.assess_report.assert_called_once_with(
+        "RETRY-001", report
+    )
+    application.run_clarification_loop.assert_not_called()
+    data.create_report.assert_not_called()
+
+
+def test_existing_retry_function_delegates(monkeypatch):
+    application_class = Mock()
+    monkeypatch.setattr(
+        main, "SafeReportApplication", application_class
+    )
+
+    main.retry_failed_report()
+
+    application_class.assert_called_once_with(
+        io_manager=main.io_manager,
+        ai_manager=main.ai_manager,
+        logic_manager=main.logic_manager,
+        data_manager=main.data_manager,
+    )
+    application_class.return_value.retry_failed_report.assert_called_once_with()
