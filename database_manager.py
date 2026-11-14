@@ -136,4 +136,25 @@ class DatabaseManager:
         except(AttributeError, TypeError) as error:
             print("Failed to filter reports:", error)
             return None
-        
+
+    
+    def filter_by_location(self, location):
+        try:
+            reports = self.load_reports()
+
+            if reports is None:
+                return None
+
+            filtered_reports = []
+
+            for report in reports:
+                case_details = report.get("case_details", {})
+
+                if case_details.get("workplace_location") == location:
+                    filtered_reports.append(report)
+
+            return filtered_reports
+
+        except (AttributeError, TypeError) as error:
+            print("Failed to filter reports by location:", error)
+            return None
