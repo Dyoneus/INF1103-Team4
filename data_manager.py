@@ -95,26 +95,34 @@ class DataManager:
 
     def create_report(self, report):
         """Save a new report to JSON and SQLite."""
-        report_path = save_raw_report(report)
-
-        if not report_path:
-            return report_path
-
-        try:
-            with Path(report_path).open("r", encoding="utf-8") as file:
-                saved_report = json.load(file)
-        except(OSError, json.JSONDecodeError):
-            return None
 
         if not self.database_ready:
             print("SQLite database is not ready.")
             return None
 
-        if not self.database.create_report(saved_report):
-            print("Warning: Report saved to JSON but not SQLite.")
-            return None
+        report_path = None
 
-        return report_path
+        try:
+            report_path = save_raw_report(report)
+
+            if not report_path:
+                return None
+
+            with Path(report_path).open("r", encoding="utf-8") as file:
+                saved_report = json.load(file)
+
+            if not self.database.create_report(saved_report):
+                print("Failed to save report to SQLite.")
+
+                # Keep JSON and photos for recovery.
+                print("JSON report retained for recovery:", report_path)
+                return None
+
+            return report_path
+
+        except (OSError, json.JSONDecodeError, TypeError, KeyError) as error:
+            print("Failed to create report:", error)
+            return None
 
 
     def update_report(self, reference_id, updated_data, case_changes=None):
