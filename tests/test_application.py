@@ -1,4 +1,5 @@
 from unittest.mock import Mock, call
+from pathlib import Path
 
 import pytest
 import main
@@ -399,3 +400,128 @@ def test_existing_clarification_function_delegates(monkeypatch):
     application_class.return_value.run_clarification_loop.assert_called_once_with(
         "TEST-001", report, assessment
     )
+
+@pytest.fixture
+def creation_setup(assessment_setup):
+    application, io, ai, logic, data, report = assessment_setup
+
+    io.collect_report.return_value = report
+    io.review_report_before_submission.return_value = report
+    data.create_report.return_value = Path("reports/NEW-001.json")
+
+    application.assess_report = Mock(return_value={
+        "status": "NEEDS_CLARIFICATION",
+        "clarification_codes": ["CLARIFY_LOCATION"],
+    })
+    application.run_clarification_loop = Mock()
+
+    return application, io, data, report
+
+
+def test_creation_uses_reviewed_report_and_saves_before_assessment(
+    creation_setup
+):
+    application, io, data, report = creation_setup
+
+    reviewed_report = {
+        "reporter": report["reporter"].copy(),
+        "case_details": report["case_details"].copy(),
+    }
+    reviewed_report["case_details"]["description"] = (
+        "Sparks from an exposed electrical cable."
+    )
+    io.review_report_before_submission.return_value = reviewed_report
+
+    assessment = application.assess_report.return_value
+
+    events = Mock()
+    events.attach_mock(io, "io")
+    events.attach_mock(data, "data")
+    events.attach_mock(application.assess_report, "assess")
+    events.attach_mock(application.run_clarification_loop, "clarify")
+
+    application.process_new_report()
+
+    assert events.mock_calls == [
+        call.io.collect_report(),
+        call.io.review_report_before_submission(report),
+        call.data.create_report(reviewed_report),
+        call.io.display_report_reference("NEW-001"),
+        call.assess("NEW-001", reviewed_report),
+        call.clarify("NEW-001", reviewed_report, assessment),
+    ]
+
+
+@pytest.mark.parametrize("stage", ["collection", "review"])
+def test_creation_cancellation_stops_before_saving(
+    creation_setup, stage
+):
+    application, io, data, report = creation_setup
+
+    if stage == "collection":
+        io.collect_report.return_value = None
+    else:
+        io.review_report_before_submission.return_value = None
+
+    application.process_new_report()
+
+    io.collect_report.assert_called_once_with()
+
+    if stage == "collection":
+        io.review_report_before_submission.assert_not_called()
+    else:
+        io.review_report_before_submission.assert_called_once_with(report)
+
+    data.create_report.assert_not_called()
+    application.assess_report.assert_not_called()
+    application.run_clarification_loop.assert_not_called()
+    io.display_report_reference.assert_not_called()
+    io.display_processing_error.assert_not_called()
+
+
+def test_creation_save_failure_stops_before_assessment(
+    creation_setup
+):
+    application, io, data, report = creation_setup
+    data.create_report.side_effect = OSError("Disk unavailable")
+
+    application.process_new_report()
+
+    data.create_report.assert_called_once_with(report)
+    io.display_processing_error.assert_called_once_with("SAVE_FAILED")
+    io.display_report_reference.assert_not_called()
+    application.assess_report.assert_not_called()
+    application.run_clarification_loop.assert_not_called()
+
+
+def test_creation_does_not_clarify_when_assessment_fails(
+    creation_setup
+):
+    application, io, data, report = creation_setup
+    application.assess_report.return_value = None
+
+    application.process_new_report()
+
+    data.create_report.assert_called_once_with(report)
+    io.display_report_reference.assert_called_once_with("NEW-001")
+    application.assess_report.assert_called_once_with(
+        "NEW-001", report
+    )
+    application.run_clarification_loop.assert_not_called()
+
+
+def test_existing_creation_function_delegates(monkeypatch):
+    application_class = Mock()
+    monkeypatch.setattr(
+        main, "SafeReportApplication", application_class
+    )
+
+    main.process_new_report()
+
+    application_class.assert_called_once_with(
+        io_manager=main.io_manager,
+        ai_manager=main.ai_manager,
+        logic_manager=main.logic_manager,
+        data_manager=main.data_manager,
+    )
+    application_class.return_value.process_new_report.assert_called_once_with()

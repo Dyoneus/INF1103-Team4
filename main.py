@@ -136,6 +136,34 @@ class SafeReportApplication:
                 assessment.get("clarification_codes", [])
             )
 
+    def process_new_report(self):
+        #collect, save and assess one new report
+        report = self._io.collect_report()
+
+        if report is None:
+            return
+
+        report = self._io.review_report_before_submission(report)
+
+        if report is None:
+            return
+
+        try:
+            report_path = self._data.create_report(report)
+        except OSError:
+            self._io.display_processing_error("SAVE_FAILED")
+            return
+
+        reference_id = Path(report_path).stem
+        self._io.display_report_reference(reference_id)
+
+        assessment = self.assess_report(reference_id, report)
+
+        if assessment is not None:
+            self.run_clarification_loop(
+                reference_id, report, assessment
+            )
+
 
 def handle_ai_failure(reference_id, error_code):
     #bridges existing workflows to the application during migration
@@ -150,32 +178,14 @@ def handle_ai_failure(reference_id, error_code):
 
 
 def process_new_report():
-    #process one safety report through the four managers
-
-    # collect user input
-    report = io_manager.collect_report()
-
-    if report is None:
-        return
-
-    report = io_manager.review_report_before_submission(report)
-    if report is None:
-        return
-
-    # save the original report
-    try:
-        report_path = data_manager.create_report(report)
-    except OSError:
-        io_manager.display_processing_error("SAVE_FAILED")
-        return
-
-    reference_id = Path(report_path).stem
-    io_manager.display_report_reference(reference_id)
-
-    assessment = assess_report(reference_id, report)
-
-    if assessment is not None:
-        run_clarification_loop(reference_id, report, assessment)
+    #bridge existing workflows to the application during migration
+    application = SafeReportApplication(
+        io_manager=io_manager,
+        ai_manager=ai_manager,
+        logic_manager=logic_manager,
+        data_manager=data_manager,
+    )
+    return application.process_new_report()
 
 
 def assess_report(reference_id, report):
