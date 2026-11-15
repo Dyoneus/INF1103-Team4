@@ -187,6 +187,33 @@ class SafeReportApplication:
                 reference_id, report, assessment
             )
 
+    def clarify_report(self):
+        #select a saved report and resume its clarification
+
+        reports = self._data.load_reports()
+
+        if reports is None:
+            self._io.display_processing_error("LOAD_FAILED")
+            return
+
+        reports = [
+            report for report in reports
+            if isinstance(report.get("assessment"), dict)
+            and report["assessment"].get("status")
+            in ("INCOMPLETE", "NEEDS_CLARIFICATION")
+        ]
+
+        report = self._io.select_saved_report(reports)
+
+        if report is None:
+            return
+
+        self.run_clarification_loop(
+            report["reference_id"],
+            report,
+            report["assessment"],
+        )
+
 
 def handle_ai_failure(reference_id, error_code):
     #bridges existing workflows to the application during migration
@@ -238,7 +265,7 @@ def run_clarification_loop(reference_id, report, assessment):
 
 def retry_failed_report():
     #bridge existing workflows to the application during migration
-    
+
     application = SafeReportApplication(
         io_manager=io_manager,
         ai_manager=ai_manager,
@@ -249,36 +276,18 @@ def retry_failed_report():
 
 
 def clarify_report():
-    #resume clarification for a saved report
-
-    reports = data_manager.load_reports()
-
-    if reports is None:
-        io_manager.display_processing_error("LOAD_FAILED")
-        return
-
-    #retrieve reports that require clarification
-    reports = [
-        report for report in reports
-        if isinstance(report.get("assessment"), dict)
-        and report["assessment"].get("status")
-        in ("INCOMPLETE", "NEEDS_CLARIFICATION")
-    ]
-
-    report = io_manager.select_saved_report(reports)
-
-    if report is None:
-        return
-
-    #resume using the existing reference ID and assessment
-    run_clarification_loop(
-        report["reference_id"],
-        report,
-        report["assessment"]
+    #bridge existing workflows to the application during migration
+    
+    application = SafeReportApplication(
+        io_manager=io_manager,
+        ai_manager=ai_manager,
+        logic_manager=logic_manager,
+        data_manager=data_manager,
     )
+    return application.clarify_report()
 
 def run():
-    """Run the SafeReport menu."""
+    #run the SafeReport menu
 
     if data_manager.load_reports() is None:
         io_manager.display_processing_error("LOAD_FAILED")

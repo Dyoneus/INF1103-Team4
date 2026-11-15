@@ -102,6 +102,7 @@ def test_clarification_saves_before_ai_and_reassesses(tmp_path, monkeypatch):
     assert result["reporter"] == original["reporter"]
     assert result["case_details"]["photos"] == original["case_details"]["photos"]
     assert len(list(tmp_path.glob("*.json"))) == 1
+    assert data_manager.manager.database.load_reports() == [result]
 
 
 def test_corrections_survive_ai_failure_and_can_be_retried(tmp_path, monkeypatch):

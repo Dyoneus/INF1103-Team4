@@ -634,3 +634,121 @@ def test_existing_retry_function_delegates(monkeypatch):
         data_manager=main.data_manager,
     )
     application_class.return_value.retry_failed_report.assert_called_once_with()
+
+
+@pytest.fixture
+def saved_clarification_setup(assessment_setup):
+    application, io, ai, logic, data, report = assessment_setup
+
+    report["reference_id"] = "CLARIFY-002"
+    report["assessment"] = {
+        "status": "NEEDS_CLARIFICATION",
+        "clarification_codes": ["CLARIFY_LOCATION"],
+    }
+
+    data.load_reports.return_value = [report]
+    io.select_saved_report.return_value = report
+    application.run_clarification_loop = Mock()
+    application.assess_report = Mock()
+
+    return application, io, data, report
+
+
+@pytest.mark.parametrize(
+    "status",
+    ["INCOMPLETE", "NEEDS_CLARIFICATION"],
+)
+def test_saved_clarification_filters_and_resumes_selected_record(
+    saved_clarification_setup, status
+):
+    application, io, data, report = saved_clarification_setup
+    report["assessment"]["status"] = status
+
+    other_eligible = {
+        "reference_id": "CLARIFY-001",
+        "case_details": {},
+        "assessment": {
+            "status": "NEEDS_CLARIFICATION",
+            "clarification_codes": ["CLARIFY_LOCATION"],
+        },
+    }
+
+    data.load_reports.return_value = [
+        {
+            "reference_id": "READY",
+            "assessment": {"status": "READY_FOR_REVIEW"},
+        },
+        {
+            "reference_id": "FAILED",
+            "assessment": {"status": "AI_FAILED"},
+        },
+        {"reference_id": "MISSING"},
+        {"reference_id": "NULL", "assessment": None},
+        {"reference_id": "BAD", "assessment": "invalid"},
+        other_eligible,
+        report,
+    ]
+
+    application.clarify_report()
+
+    data.load_reports.assert_called_once_with()
+    io.select_saved_report.assert_called_once_with(
+        [other_eligible, report]
+    )
+    application.run_clarification_loop.assert_called_once_with(
+        "CLARIFY-002", report, report["assessment"]
+    )
+    application.assess_report.assert_not_called()
+    data.create_report.assert_not_called()
+    io.display_processing_error.assert_not_called()
+
+
+def test_saved_clarification_load_failure_stops_selection(
+    saved_clarification_setup
+):
+    application, io, data, report = saved_clarification_setup
+    data.load_reports.return_value = None
+
+    application.clarify_report()
+
+    io.display_processing_error.assert_called_once_with("LOAD_FAILED")
+    io.select_saved_report.assert_not_called()
+    application.run_clarification_loop.assert_not_called()
+    application.assess_report.assert_not_called()
+    data.create_report.assert_not_called()
+
+
+@pytest.mark.parametrize("has_eligible_reports", [False, True])
+def test_saved_clarification_no_selection_stops_workflow(
+    saved_clarification_setup, has_eligible_reports
+):
+    application, io, data, report = saved_clarification_setup
+    reports = [report] if has_eligible_reports else []
+
+    data.load_reports.return_value = reports
+    io.select_saved_report.return_value = None
+
+    application.clarify_report()
+
+    io.select_saved_report.assert_called_once_with(reports)
+    application.run_clarification_loop.assert_not_called()
+    application.assess_report.assert_not_called()
+    data.create_report.assert_not_called()
+    io.display_processing_error.assert_not_called()
+
+
+def test_existing_saved_clarification_function_delegates(monkeypatch):
+    application_class = Mock()
+    monkeypatch.setattr(
+        main, "SafeReportApplication", application_class
+    )
+
+    main.clarify_report()
+
+    application_class.assert_called_once_with(
+        io_manager=main.io_manager,
+        ai_manager=main.ai_manager,
+        logic_manager=main.logic_manager,
+        data_manager=main.data_manager,
+    )
+    application_class.return_value.clarify_report.assert_called_once_with()
