@@ -138,3 +138,67 @@ class LogicManager:
             "status": status,
             "clarification_codes": clarification_codes
         }
+
+    # Sort reports based on workplace location
+    def sort_reports_by_location(self, reports):
+
+        if not isinstance(reports, list):
+            return []
+
+        location_groups = {}
+
+        for report in reports:
+
+            if not isinstance(report, dict):
+                continue
+
+            case_details = report.get("case_details")
+
+            if not isinstance(case_details, dict):
+                continue
+
+            location = case_details.get("workplace_location")
+
+            if not isinstance(location, str) or not location.strip():
+                continue
+
+            # Standardise location spacing and capitalisation
+            location = " ".join(location.split())
+            location_key = location.casefold()
+
+            if location_key not in location_groups:
+                location_groups[location_key] = {
+                    "location": location,
+                    "reference_ids": set(),
+                    "reports": []
+                }
+
+            group = location_groups[location_key]
+
+            group["reports"].append(report)
+
+            reference_id = report.get("reference_id")
+
+            if isinstance(reference_id, str) and reference_id.strip():
+                group["reference_ids"].add(reference_id.strip())
+
+        location_summary = []
+
+        for group in location_groups.values():
+
+            location_summary.append({
+                "location": group["location"],
+                "unique_report_count": len(group["reference_ids"]),
+                "total_report_count": len(group["reports"]),
+                "reports": group["reports"]
+            })
+
+        # Sort by report count, highest first
+        location_summary.sort(
+            key=lambda item: (
+                -item["unique_report_count"],
+                item["location"].casefold()
+            )
+        )
+
+        return location_summary
