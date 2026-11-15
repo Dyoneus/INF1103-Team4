@@ -216,7 +216,6 @@ class SafeReportApplication:
 
     def run(self):
         #run the console menu using this application's managers
-        
         if self._data.load_reports() is None:
             self._io.display_processing_error("LOAD_FAILED")
             return
@@ -309,7 +308,6 @@ def clarify_report():
 
 def run():
     #create the application using the current manager interfaces
-    
     application = SafeReportApplication(
         io_manager=io_manager,
         ai_manager=ai_manager,
