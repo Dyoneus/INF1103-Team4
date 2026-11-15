@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Admin sign in - SafeReport{% endblock %}
+
+{% block content %}
+<h1>Admin sign in</h1>
+
+{% if admin_enabled %}
+<form class="panel form narrow" method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="field">
+    <label for="username">Username</label>
+    <input id="username" name="username" type="text" value="{{ username }}" autocomplete="username"
+           autocapitalize="none" spellcheck="false" required autofocus>
+  </div>
+  <div class="field">
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" required>
+  </div>
+  <button class="button button-primary" type="submit">Sign in</button>
+</form>
+{% else %}
+<section class="panel narrow">
+  <p>Admin sign-in is switched off because no admin username and password have been set.</p>
+  <p class="hint">Set the <code>SAFEREPORT_ADMIN_USERNAME</code> and <code>SAFEREPORT_ADMIN_PASSWORD</code>
+    environment variables and restart the web app.</p>
+</section>
+{% endif %}
+{% endblock %}

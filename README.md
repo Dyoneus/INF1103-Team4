@@ -92,6 +92,49 @@ This AI step is separate from entering a report and requires a valid API key. It
 
 Use the Compose commands above if you want files to appear in the project folders. If you run the image directly with `docker run` and mount a **named volume** at `/app/reports`, Docker keeps the files in its own managed storage; they will persist, but they will not appear in the project’s local `reports/` folder.
 
+## Web interface (GUI)
+
+`web_app.py` is a Flask web interface over the same four managers as the terminal menu. Reports created in one show up in the other.
+
+Run it locally from the repository root, with the virtual environment active:
+
+```powershell
+python -m pip install -r requirements.txt
+$env:GROQ_API_KEY = "your_actual_groq_api_key"
+$env:SAFEREPORT_ADMIN_USERNAME = "choose_an_admin_username"
+$env:SAFEREPORT_ADMIN_PASSWORD = "choose_an_admin_password"
+python web_app.py
+```
+
+Then open <http://127.0.0.1:5000>. Stop the server with Ctrl+C.
+
+Or run it in Docker (reads `GROQ_API_KEY`, `SAFEREPORT_ADMIN_USERNAME` and `SAFEREPORT_ADMIN_PASSWORD` from `.env`):
+
+```sh
+docker compose up --build web
+```
+
+### Who can see what
+
+| Page | Who | What it does | Terminal equivalent |
+|---|---|---|---|
+| Report form (`/`) | Everyone | Validates the form, saves the report and photos, then assesses it | Menu option 1 |
+| Report page (`/reports/<id>`) | Admins, and the person who submitted it | Shows the report and its assessment. **Retry assessment** reruns a failed assessment; **Save and reassess** asks only for the details the assessment flagged | Menu options 2 and 3 |
+| Admin sign in (`/admin/login`) | Everyone | Signs the admin in with `SAFEREPORT_ADMIN_USERNAME` and `SAFEREPORT_ADMIN_PASSWORD` | - |
+| All reports (`/admin`) | Admins | Lists saved reports, filters them by status, and ranks locations by report count | - |
+
+A member of the public can reopen only the reports they submitted from the same browser (remembered in their session cookie), so they can answer clarification questions without seeing anyone else's report. If either `SAFEREPORT_ADMIN_USERNAME` or `SAFEREPORT_ADMIN_PASSWORD` is not set, nobody can sign in as an admin. The username is case-sensitive. Do not commit the password; keep it in `.env` or your shell.
+
+### How it fits the design
+
+- `SafeReportWebApp` owns the Flask app and routes. It is given the AI, Logic and Data managers, so tests pass in fakes.
+- `AccessControl` decides who may see what: admin sign-in, sign-out, and which reports a visitor submitted.
+- `WebReportForm` checks browser input with the same `Validator` subclasses as the terminal form.
+- `WebNotifier` stands in for the terminal `IOManager`, so `SafeReportApplication.assess_report()` runs unchanged and its messages appear on the page.
+- `tests/test_web_app.py` covers the pages and the access rules with Flask's test client, without a live AI call.
+
+The web interface uses Flask's development server and listens on `127.0.0.1` only, which suits local use and demos. Hosting it for real public use would need a production WSGI server and HTTPS. Optional settings: `SAFEREPORT_HOST`, `SAFEREPORT_PORT`, and `SAFEREPORT_SECRET_KEY` (keeps sessions valid across restarts).
+
 ## Tests
 
 SafeReport includes automated tests for the four managers and the main application workflow.
@@ -136,6 +179,7 @@ To test a specific module:
 python -m pytest tests/test_ai_manager.py -v
 python -m pytest tests/test_io_manager.py -v
 python -m pytest tests/test_main.py -v
+python -m pytest tests/test_web_app.py -v
 ```
 
 The automated tests use simulated AI responses rather than making live Groq API requests.

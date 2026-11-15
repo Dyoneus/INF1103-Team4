@@ -8,3 +8,18 @@ services:
     volumes:
       - ./reports:/app/reports
       - ./data:/data
+
+  # Web interface: docker compose up web, then open http://localhost:5000
+  web:
+    build: .
+    command: python web_app.py
+    environment:
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      SAFEREPORT_HOST: 0.0.0.0
+      SAFEREPORT_ADMIN_USERNAME: ${SAFEREPORT_ADMIN_USERNAME:-}
+      SAFEREPORT_ADMIN_PASSWORD: ${SAFEREPORT_ADMIN_PASSWORD:-}
+    ports:
+      - "127.0.0.1:5000:5000"
+    volumes:
+      - ./reports:/app/reports
+      - ./data:/data
