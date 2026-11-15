@@ -1,3 +1,4 @@
+
 class LogicManager:
 
     def __init__(self):
@@ -162,14 +163,13 @@ class LogicManager:
             if not isinstance(location, str) or not location.strip():
                 continue
 
-            # Standardise location spacing and capitalisation
+            # Standardise spacing and capitalisation
             location = " ".join(location.split())
             location_key = location.casefold()
 
             if location_key not in location_groups:
                 location_groups[location_key] = {
                     "location": location,
-                    "reference_ids": set(),
                     "reports": []
                 }
 
@@ -177,26 +177,20 @@ class LogicManager:
 
             group["reports"].append(report)
 
-            reference_id = report.get("reference_id")
-
-            if isinstance(reference_id, str) and reference_id.strip():
-                group["reference_ids"].add(reference_id.strip())
-
         location_summary = []
 
         for group in location_groups.values():
 
             location_summary.append({
                 "location": group["location"],
-                "unique_report_count": len(group["reference_ids"]),
-                "total_report_count": len(group["reports"]),
+                "report_count": len(group["reports"]),
                 "reports": group["reports"]
             })
 
         # Sort by report count, highest first
         location_summary.sort(
             key=lambda item: (
-                -item["unique_report_count"],
+                -item["report_count"],
                 item["location"].casefold()
             )
         )
