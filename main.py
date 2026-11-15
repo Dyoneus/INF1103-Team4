@@ -214,6 +214,26 @@ class SafeReportApplication:
             report["assessment"],
         )
 
+    def run(self):
+        #run the console menu using this application's managers
+        if self._data.load_reports() is None:
+            self._io.display_processing_error("LOAD_FAILED")
+            return
+
+        while True:
+            self._io.display_menu()
+            choice = self._io.get_menu_choice()
+
+            if choice == "0":
+                return
+
+            if choice == "1":
+                self.process_new_report()
+            elif choice == "2":
+                self.retry_failed_report()
+            elif choice == "3":
+                self.clarify_report()
+
 
 def handle_ai_failure(reference_id, error_code):
     #bridges existing workflows to the application during migration
@@ -221,7 +241,7 @@ def handle_ai_failure(reference_id, error_code):
     application = SafeReportApplication(
         io_manager=io_manager,
         ai_manager=ai_manager,
-        logic_manager=logic_manager,
+        logic_manager=logic_manager.LogicManager(),
         data_manager=data_manager,
     )
     return application.handle_ai_failure(reference_id, error_code)
@@ -232,7 +252,7 @@ def process_new_report():
     application = SafeReportApplication(
         io_manager=io_manager,
         ai_manager=ai_manager,
-        logic_manager=logic_manager,
+        logic_manager=logic_manager.LogicManager(),
         data_manager=data_manager,
     )
     return application.process_new_report()
@@ -243,7 +263,7 @@ def assess_report(reference_id, report):
     application = SafeReportApplication(
         io_manager=io_manager,
         ai_manager=ai_manager,
-        logic_manager=logic_manager,
+        logic_manager=logic_manager.LogicManager(),
         data_manager=data_manager,
     )
     return application.assess_report(reference_id, report)
@@ -255,7 +275,7 @@ def run_clarification_loop(reference_id, report, assessment):
     application = SafeReportApplication(
         io_manager=io_manager,
         ai_manager=ai_manager,
-        logic_manager=logic_manager,
+        logic_manager=logic_manager.LogicManager(),
         data_manager=data_manager,
     )
     return application.run_clarification_loop(
@@ -269,7 +289,7 @@ def retry_failed_report():
     application = SafeReportApplication(
         io_manager=io_manager,
         ai_manager=ai_manager,
-        logic_manager=logic_manager,
+        logic_manager=logic_manager.LogicManager(),
         data_manager=data_manager,
     )
     return application.retry_failed_report()
@@ -281,31 +301,20 @@ def clarify_report():
     application = SafeReportApplication(
         io_manager=io_manager,
         ai_manager=ai_manager,
-        logic_manager=logic_manager,
+        logic_manager=logic_manager.LogicManager(),
         data_manager=data_manager,
     )
     return application.clarify_report()
 
 def run():
-    #run the SafeReport menu
-
-    if data_manager.load_reports() is None:
-        io_manager.display_processing_error("LOAD_FAILED")
-        return
-
-    while True:
-        io_manager.display_menu()
-        choice = io_manager.get_menu_choice()
-
-        if choice == "0":
-            return
-
-        if choice == "1":
-            process_new_report()
-        elif choice == "2":
-            retry_failed_report()
-        elif choice == "3":
-            clarify_report()
+    #create the application using the current manager interfaces
+    application = SafeReportApplication(
+        io_manager=io_manager,
+        ai_manager=ai_manager,
+        logic_manager=logic_manager.LogicManager(),
+        data_manager=data_manager,
+    )
+    return application.run()
 
 
 if __name__ == "__main__":

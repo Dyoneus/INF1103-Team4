@@ -183,9 +183,20 @@ def test_menu_dispatches_saved_workflows(monkeypatch):
     answer_with(monkeypatch, ["2", "3", "0"])
     monkeypatch.setattr(data_manager, "load_reports", lambda: [])
     calls = []
-    monkeypatch.setattr(main, "retry_failed_report", lambda: calls.append("retry"))
-    monkeypatch.setattr(main, "clarify_report", lambda: calls.append("clarify"))
+
+    monkeypatch.setattr(
+        main.SafeReportApplication,
+        "retry_failed_report",
+        lambda self: calls.append("retry"),
+    )
+    monkeypatch.setattr(
+        main.SafeReportApplication,
+        "clarify_report",
+        lambda self: calls.append("clarify"),
+    )
+
     main.run()
+
     assert calls == ["retry", "clarify"]
 
 

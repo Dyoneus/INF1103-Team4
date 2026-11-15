@@ -4,6 +4,15 @@ from pathlib import Path
 import pytest
 import main
 
+@pytest.fixture
+def logic_instance(monkeypatch):
+    logic = Mock(spec=main.logic_manager.LogicManager)
+    monkeypatch.setattr(
+        main.logic_manager,
+        "LogicManager",
+        Mock(return_value=logic),
+    )
+    return logic
 
 def test_constructor_keeps_supplied_managers_without_calling_them():
     managers = [Mock() for _ in range(4)]
@@ -60,7 +69,7 @@ def test_ai_failure_uses_injected_managers(error_code, save_succeeds):
     ]
 
 
-def test_existing_function_delegates_to_application(monkeypatch):
+def test_existing_function_delegates_to_application(monkeypatch, logic_instance):
     application_class = Mock()
     monkeypatch.setattr(
         main, "SafeReportApplication", application_class
@@ -71,7 +80,7 @@ def test_existing_function_delegates_to_application(monkeypatch):
     application_class.assert_called_once_with(
         io_manager=main.io_manager,
         ai_manager=main.ai_manager,
-        logic_manager=main.logic_manager,
+        logic_manager=logic_instance,
         data_manager=main.data_manager,
     )
     application_class.return_value.handle_ai_failure.assert_called_once_with(
@@ -82,7 +91,7 @@ def test_existing_function_delegates_to_application(monkeypatch):
 def assessment_setup():
     io = Mock(spec=main.io_manager.IOManager)
     ai = Mock(spec=main.ai_manager)
-    logic = Mock(spec=main.logic_manager)
+    logic = Mock(spec=main.logic_manager.LogicManager)
     data = Mock(spec=main.data_manager)
     application = main.SafeReportApplication(io, ai, logic, data)
 
@@ -198,7 +207,7 @@ def test_assessment_save_failure_does_not_display_success(
     io.display_assessment_result.assert_not_called()
 
 
-def test_existing_assessment_function_delegates(monkeypatch):
+def test_existing_assessment_function_delegates(monkeypatch, logic_instance):
     application_class = Mock()
     monkeypatch.setattr(
         main, "SafeReportApplication", application_class
@@ -210,7 +219,7 @@ def test_existing_assessment_function_delegates(monkeypatch):
     application_class.assert_called_once_with(
         io_manager=main.io_manager,
         ai_manager=main.ai_manager,
-        logic_manager=main.logic_manager,
+        logic_manager=logic_instance,
         data_manager=main.data_manager,
     )
     application_class.return_value.assess_report.assert_called_once_with(
@@ -378,7 +387,7 @@ def test_clarification_displays_only_outstanding_questions_at_limit(
         )
 
 
-def test_existing_clarification_function_delegates(monkeypatch):
+def test_existing_clarification_function_delegates(monkeypatch, logic_instance):
     application_class = Mock()
     monkeypatch.setattr(
         main, "SafeReportApplication", application_class
@@ -394,7 +403,7 @@ def test_existing_clarification_function_delegates(monkeypatch):
     application_class.assert_called_once_with(
         io_manager=main.io_manager,
         ai_manager=main.ai_manager,
-        logic_manager=main.logic_manager,
+        logic_manager=logic_instance,
         data_manager=main.data_manager,
     )
     application_class.return_value.run_clarification_loop.assert_called_once_with(
@@ -510,7 +519,8 @@ def test_creation_does_not_clarify_when_assessment_fails(
     application.run_clarification_loop.assert_not_called()
 
 
-def test_existing_creation_function_delegates(monkeypatch):
+
+def test_existing_creation_function_delegates(monkeypatch, logic_instance):
     application_class = Mock()
     monkeypatch.setattr(
         main, "SafeReportApplication", application_class
@@ -521,7 +531,7 @@ def test_existing_creation_function_delegates(monkeypatch):
     application_class.assert_called_once_with(
         io_manager=main.io_manager,
         ai_manager=main.ai_manager,
-        logic_manager=main.logic_manager,
+        logic_manager=logic_instance,
         data_manager=main.data_manager,
     )
     application_class.return_value.process_new_report.assert_called_once_with()
@@ -619,7 +629,7 @@ def test_retry_failed_assessment_does_not_start_clarification(
     data.create_report.assert_not_called()
 
 
-def test_existing_retry_function_delegates(monkeypatch):
+def test_existing_retry_function_delegates(monkeypatch, logic_instance):
     application_class = Mock()
     monkeypatch.setattr(
         main, "SafeReportApplication", application_class
@@ -630,7 +640,7 @@ def test_existing_retry_function_delegates(monkeypatch):
     application_class.assert_called_once_with(
         io_manager=main.io_manager,
         ai_manager=main.ai_manager,
-        logic_manager=main.logic_manager,
+        logic_manager=logic_instance,
         data_manager=main.data_manager,
     )
     application_class.return_value.retry_failed_report.assert_called_once_with()
@@ -737,7 +747,8 @@ def test_saved_clarification_no_selection_stops_workflow(
     io.display_processing_error.assert_not_called()
 
 
-def test_existing_saved_clarification_function_delegates(monkeypatch):
+
+def test_existing_saved_clarification_function_delegates(monkeypatch, logic_instance):
     application_class = Mock()
     monkeypatch.setattr(
         main, "SafeReportApplication", application_class
@@ -748,7 +759,93 @@ def test_existing_saved_clarification_function_delegates(monkeypatch):
     application_class.assert_called_once_with(
         io_manager=main.io_manager,
         ai_manager=main.ai_manager,
-        logic_manager=main.logic_manager,
+        logic_manager=logic_instance,
         data_manager=main.data_manager,
     )
     application_class.return_value.clarify_report.assert_called_once_with()
+
+@pytest.fixture
+def menu_setup(assessment_setup):
+    application, io, ai, logic, data, report = assessment_setup
+
+    data.load_reports.return_value = []
+    io.get_menu_choice.return_value = "0"
+
+    application.process_new_report = Mock()
+    application.retry_failed_report = Mock()
+    application.clarify_report = Mock()
+
+    return application, io, data
+
+
+def test_menu_dispatches_workflows_on_the_same_application(menu_setup):
+    application, io, data = menu_setup
+    io.get_menu_choice.side_effect = ["1", "2", "3", "0"]
+
+    workflows = Mock()
+    workflows.attach_mock(application.process_new_report, "create")
+    workflows.attach_mock(application.retry_failed_report, "retry")
+    workflows.attach_mock(application.clarify_report, "clarify")
+
+    application.run()
+
+    assert workflows.mock_calls == [
+        call.create(),
+        call.retry(),
+        call.clarify(),
+    ]
+    data.load_reports.assert_called_once_with()
+    assert io.display_menu.call_count == 4
+    assert io.get_menu_choice.call_count == 4
+    io.display_processing_error.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "reports",
+    [[], [{"reference_id": "SAVED-001"}]],
+)
+def test_menu_exit_does_not_start_a_workflow(menu_setup, reports):
+    application, io, data = menu_setup
+    data.load_reports.return_value = reports
+
+    application.run()
+
+    data.load_reports.assert_called_once_with()
+    io.display_menu.assert_called_once_with()
+    io.get_menu_choice.assert_called_once_with()
+    application.process_new_report.assert_not_called()
+    application.retry_failed_report.assert_not_called()
+    application.clarify_report.assert_not_called()
+    io.display_processing_error.assert_not_called()
+
+
+def test_menu_load_failure_stops_before_showing_menu(menu_setup):
+    application, io, data = menu_setup
+    data.load_reports.return_value = None
+
+    application.run()
+
+    data.load_reports.assert_called_once_with()
+    io.display_processing_error.assert_called_once_with("LOAD_FAILED")
+    io.display_menu.assert_not_called()
+    io.get_menu_choice.assert_not_called()
+    application.process_new_report.assert_not_called()
+    application.retry_failed_report.assert_not_called()
+    application.clarify_report.assert_not_called()
+
+
+def test_existing_run_function_delegates(monkeypatch, logic_instance):
+    application_class = Mock()
+    monkeypatch.setattr(
+        main, "SafeReportApplication", application_class
+    )
+
+    main.run()
+
+    application_class.assert_called_once_with(
+        io_manager=main.io_manager,
+        ai_manager=main.ai_manager,
+        logic_manager=logic_instance,
+        data_manager=main.data_manager,
+    )
+    application_class.return_value.run.assert_called_once_with()
