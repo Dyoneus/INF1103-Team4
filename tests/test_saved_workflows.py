@@ -12,6 +12,7 @@ import data_manager
 import io_manager
 import main
 
+from database_manager import DatabaseManager
 
 FIELDS = {
     "issue_clarity": "CLEAR", "location_quality": "ADEQUATE",
@@ -19,6 +20,14 @@ FIELDS = {
     "safety_category": "ELECTRICAL",
 }
 
+@pytest.fixture(autouse=True)
+def isolated_database(tmp_path, monkeypatch):
+    database = DatabaseManager(tmp_path / "safereport.db")
+    assert database.initialize_database()
+
+    monkeypatch.setattr(data_manager, "REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(data_manager.manager, "database", database)
+    monkeypatch.setattr(data_manager.manager, "database_ready", True)
 
 def saved_report(tmp_path, monkeypatch, status, codes=None):
     monkeypatch.setattr(data_manager, "REPORTS_DIR", tmp_path)
@@ -188,3 +197,27 @@ def test_script_entrypoints_open_menu(script, tmp_path):
     assert result.returncode == 0, result.stderr
     assert "2. Retry a failed assessment" in result.stdout
     assert "3. Clarify and reassess" in result.stdout
+
+def test_legacy_json_is_migrated_without_duplicates(tmp_path, monkeypatch):
+    _, original = saved_report(
+        tmp_path, monkeypatch, "AI_FAILED"
+    )
+
+    assert data_manager.load_reports() == [original]
+    assert data_manager.load_reports() == [original]
+    assert data_manager.manager.database.load_reports() == [original]
+
+
+def test_invalid_legacy_json_reports_load_failure(tmp_path):
+    (tmp_path / "broken.json").write_text("{", encoding="utf-8")
+
+    assert data_manager.load_reports() is None
+
+
+def test_unavailable_database_raises_on_create(monkeypatch):
+    monkeypatch.setattr(
+        data_manager.manager, "database_ready", False
+    )
+
+    with pytest.raises(OSError):
+        data_manager.create_report({})
