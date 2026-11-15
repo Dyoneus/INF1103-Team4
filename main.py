@@ -242,7 +242,7 @@ def handle_ai_failure(reference_id, error_code):
     application = SafeReportApplication(
         io_manager=io_manager,
         ai_manager=ai_manager,
-        logic_manager=logic_manager,
+        logic_manager=logic_manager.LogicManager(),
         data_manager=data_manager,
     )
     return application.handle_ai_failure(reference_id, error_code)
@@ -253,7 +253,7 @@ def process_new_report():
     application = SafeReportApplication(
         io_manager=io_manager,
         ai_manager=ai_manager,
-        logic_manager=logic_manager,
+        logic_manager=logic_manager.LogicManager(),
         data_manager=data_manager,
     )
     return application.process_new_report()
@@ -264,7 +264,7 @@ def assess_report(reference_id, report):
     application = SafeReportApplication(
         io_manager=io_manager,
         ai_manager=ai_manager,
-        logic_manager=logic_manager,
+        logic_manager=logic_manager.LogicManager(),
         data_manager=data_manager,
     )
     return application.assess_report(reference_id, report)
@@ -276,7 +276,7 @@ def run_clarification_loop(reference_id, report, assessment):
     application = SafeReportApplication(
         io_manager=io_manager,
         ai_manager=ai_manager,
-        logic_manager=logic_manager,
+        logic_manager=logic_manager.LogicManager(),
         data_manager=data_manager,
     )
     return application.run_clarification_loop(
@@ -290,7 +290,7 @@ def retry_failed_report():
     application = SafeReportApplication(
         io_manager=io_manager,
         ai_manager=ai_manager,
-        logic_manager=logic_manager,
+        logic_manager=logic_manager.LogicManager(),
         data_manager=data_manager,
     )
     return application.retry_failed_report()
@@ -302,7 +302,7 @@ def clarify_report():
     application = SafeReportApplication(
         io_manager=io_manager,
         ai_manager=ai_manager,
-        logic_manager=logic_manager,
+        logic_manager=logic_manager.LogicManager(),
         data_manager=data_manager,
     )
     return application.clarify_report()
@@ -313,7 +313,7 @@ def run():
     application = SafeReportApplication(
         io_manager=io_manager,
         ai_manager=ai_manager,
-        logic_manager=logic_manager,
+        logic_manager=logic_manager.LogicManager(),
         data_manager=data_manager,
     )
     return application.run()

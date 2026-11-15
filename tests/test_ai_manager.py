@@ -66,6 +66,7 @@ def test_validate_response_rejects_invalid_output():
 
 
 def test_clear_hazard_without_keywords_reaches_logic_unchanged():
+    logic = logic_manager.LogicManager()
     fields = {**VALID_FIELDS, "safety_category": "SLIP_TRIP_FALL"}
     client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace()))
     response = SimpleNamespace(choices=[
@@ -82,7 +83,7 @@ def test_clear_hazard_without_keywords_reaches_logic_unchanged():
 
     create.assert_called_once()
     assert result == fields
-    assessment = logic_manager.determine_report_status(
+    assessment = logic.determine_report_status(
         ai_manager.make_result("report-1", fields=result)
     )
     assert assessment == {
@@ -91,6 +92,7 @@ def test_clear_hazard_without_keywords_reaches_logic_unchanged():
 
 
 def test_ai_identified_non_safety_observation_is_incomplete_in_logic():
+    logic = logic_manager.LogicManager()
     fields = {
         **VALID_FIELDS, "issue_clarity": "UNCLEAR", "safety_category": "UNCLEAR"
     }
@@ -105,7 +107,7 @@ def test_ai_identified_non_safety_observation_is_incomplete_in_logic():
 
     create.assert_called_once()
     assert result == fields
-    assessment = logic_manager.determine_report_status(
+    assessment = logic.determine_report_status(
         ai_manager.make_result("report-2", fields=result)
     )
     assert assessment == {
@@ -123,25 +125,27 @@ def test_validate_response_rejects_non_string_input():
 
 
 def test_success_result_is_accepted_by_logic_manager():
+    logic = logic_manager.LogicManager()
     result = ai_manager.make_result("report-1", fields=VALID_FIELDS)
 
     assert result["status"] == "success"
-    assert logic_manager.validate_ai_output(result)
-    assert logic_manager.determine_report_status(result) == {
+    assert logic.validate_ai_output(result)
+    assert logic.determine_report_status(result) == {
         "status": "READY_FOR_REVIEW",
         "clarification_codes": [],
     }
 
 
 def test_error_result_is_rejected_by_logic_manager():
+    logic = logic_manager.LogicManager()
     result = ai_manager.make_result(
         "report-1",
         error=RuntimeError("offline"),
     )
 
     assert result["status"] == "error"
-    assert not logic_manager.validate_ai_output(result)
-    assert logic_manager.determine_report_status(result)["status"] == "AI_FAILED"
+    assert not logic.validate_ai_output(result)
+    assert logic.determine_report_status(result)["status"] == "AI_FAILED"
 
 
 def test_process_report_returns_consistent_result_if_client_setup_fails():
