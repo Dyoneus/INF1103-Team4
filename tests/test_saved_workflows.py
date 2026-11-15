@@ -77,6 +77,7 @@ def test_retry_updates_original_record(tmp_path, monkeypatch):
     for field in ("case_details", "reporter", "submitted_at"):
         assert result[field] == original[field]
     assert len(list(tmp_path.glob("*.json"))) == 1
+    assert data_manager.manager.database.load_reports() == [result]
 
 
 def test_clarification_saves_before_ai_and_reassesses(tmp_path, monkeypatch):
@@ -101,6 +102,7 @@ def test_clarification_saves_before_ai_and_reassesses(tmp_path, monkeypatch):
     assert result["reporter"] == original["reporter"]
     assert result["case_details"]["photos"] == original["case_details"]["photos"]
     assert len(list(tmp_path.glob("*.json"))) == 1
+    assert data_manager.manager.database.load_reports() == [result]
 
 
 def test_corrections_survive_ai_failure_and_can_be_retried(tmp_path, monkeypatch):
@@ -181,9 +183,20 @@ def test_menu_dispatches_saved_workflows(monkeypatch):
     answer_with(monkeypatch, ["2", "3", "0"])
     monkeypatch.setattr(data_manager, "load_reports", lambda: [])
     calls = []
-    monkeypatch.setattr(main, "retry_failed_report", lambda: calls.append("retry"))
-    monkeypatch.setattr(main, "clarify_report", lambda: calls.append("clarify"))
+
+    monkeypatch.setattr(
+        main.SafeReportApplication,
+        "retry_failed_report",
+        lambda self: calls.append("retry"),
+    )
+    monkeypatch.setattr(
+        main.SafeReportApplication,
+        "clarify_report",
+        lambda self: calls.append("clarify"),
+    )
+
     main.run()
+
     assert calls == ["retry", "clarify"]
 
 
