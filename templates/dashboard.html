@@ -44,7 +44,7 @@
     {% if locations %}
       <ol class="ranking">
         {% for group in locations %}
-          <li><span>{{ group.location }}</span><b>{{ group.unique_report_count }}</b></li>
+          <li><span>{{ group.location }}</span><b>{{ group.report_count }}</b></li>
         {% endfor %}
       </ol>
     {% else %}
