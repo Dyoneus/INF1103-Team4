@@ -16,3 +16,5 @@ reports.json
 data/
 ai_output.json
 processed_reports.json
+.venv/
+__pycache__/
