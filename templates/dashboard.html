@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Reports - SafeReport{% endblock %}
+
+{% block content %}
+<h1>Safety reports</h1>
+
+<ul class="filters" aria-label="Filter by status">
+  <li><a class="chip {{ 'chip-on' if not selected_status }}" href="{{ url_for('dashboard') }}">All <b>{{ total }}</b></a></li>
+  {% for status, label in status_labels.items() %}
+    <li><a class="chip {{ 'chip-on' if selected_status == status }}"
+           href="{{ url_for('dashboard', status=status) }}">{{ label }} <b>{{ counts[status] }}</b></a></li>
+  {% endfor %}
+</ul>
+
+<div class="columns">
+  <section class="panel">
+    {% if reports %}
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th>Reference ID</th><th>Submitted</th><th>Workplace</th><th>Location</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+          {% for report in reports %}
+          <tr>
+            <td><a href="{{ url_for('report_detail', reference_id=report.reference_id) }}">{{ report.reference_id }}</a></td>
+            <td>{{ report.submitted_at }}</td>
+            <td>{{ report.case_details.get('workplace_name', '') }}</td>
+            <td>{{ report.case_details.get('workplace_location', '') }}</td>
+            <td><span class="badge badge-{{ report.status }}">{{ report.status_label }}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+      <p class="empty">No reports{{ ' with this status' if selected_status }} yet.
+        <a href="{{ url_for('new_report') }}">Create a new safety report</a>.</p>
+    {% endif %}
+  </section>
+
+  <aside class="panel">
+    <h2>Reports by location</h2>
+    {% if locations %}
+      <ol class="ranking">
+        {% for group in locations %}
+          <li><span>{{ group.location }}</span><b>{{ group.report_count }}</b></li>
+        {% endfor %}
+      </ol>
+    {% else %}
+      <p class="empty">Nothing to show yet.</p>
+    {% endif %}
+  </aside>
+</div>
+{% endblock %}

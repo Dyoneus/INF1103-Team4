@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% import "_field.html" as field %}
+{% block title %}{{ report.reference_id }} - SafeReport{% endblock %}
+
+{% block content %}
+{% if is_admin %}
+<p class="crumb"><a href="{{ url_for('dashboard') }}">&larr; All reports</a></p>
+{% else %}
+<p class="crumb"><a href="{{ url_for('new_report') }}">&larr; Submit another report</a></p>
+{% endif %}
+<div class="heading">
+  <h1>Report {{ report.reference_id }}</h1>
+  <span class="badge badge-{{ report.status }}">{{ report.status_label }}</span>
+</div>
+
+{% if not is_admin %}
+<p class="lead">Thank you. Please note your reference ID: this page can only be reopened from the browser you used to submit the report.</p>
+{% endif %}
+
+{% if report.can_retry %}
+<section class="panel callout">
+  <h2>This report has not been assessed</h2>
+  <p>The AI assessment did not complete. The report is saved, so you can run the assessment again.</p>
+  <form method="post" action="{{ url_for('retry_report', reference_id=report.reference_id) }}" data-busy>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="button button-primary" type="submit">Retry assessment</button>
+  </form>
+</section>
+{% endif %}
+
+{% if report.can_clarify %}
+<section class="panel callout">
+  <h2>Please clarify the following</h2>
+  <ul>
+    {% for question in report.clarification_questions %}<li>{{ question }}</li>{% endfor %}
+  </ul>
+
+  {% set current = values if values else report.case_details %}
+  <form class="form" method="post" action="{{ url_for('clarify_report', reference_id=report.reference_id) }}" data-busy novalidate>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {% for item in clarification_fields %}
+      {% if item.name == 'description' %}
+        {{ field.textarea(item.name, item.label, current, errors, max_description) }}
+      {% elif item.name == 'incident_datetime' %}
+        {{ field.text(item.name, item.label, current, errors, type='datetime-local', max=now) }}
+      {% else %}
+        {{ field.text(item.name, item.label, current, errors, maxlength=max_location) }}
+      {% endif %}
+    {% endfor %}
+    <button class="button button-primary" type="submit">Save and reassess</button>
+  </form>
+</section>
+{% endif %}
+
+<div class="columns">
+  <section class="panel">
+    <h2>Case details</h2>
+    <dl>
+      <dt>Description</dt><dd class="prose">{{ report.case_details.get('description', '') }}</dd>
+      <dt>Workplace name</dt><dd>{{ report.case_details.get('workplace_name', '') }}</dd>
+      <dt>Workplace location</dt><dd>{{ report.case_details.get('workplace_location', '') }}</dd>
+      <dt>Incident date/time</dt><dd>{{ report.incident_datetime }}</dd>
+      <dt>Reporter profile</dt><dd>{{ report.case_details.get('reporter_profile', '') }}</dd>
+      <dt>Submitted</dt><dd>{{ report.submitted_at }}</dd>
+      <dt>Photos</dt>
+      <dd>
+        {% if report.photo_count %}
+          {{ report.photo_count }} attached &middot; consent for use:
+          {{ 'Yes' if report.case_details.get('consent_for_image_use') else 'No' }}
+          <div class="photos">
+            {% for number in range(1, report.photo_count + 1) %}
+              <a href="{{ url_for('report_photo', reference_id=report.reference_id, number=number) }}">
+                <img src="{{ url_for('report_photo', reference_id=report.reference_id, number=number) }}"
+                     alt="Photo {{ number }} attached to this report" loading="lazy">
+              </a>
+            {% endfor %}
+          </div>
+        {% else %}None{% endif %}
+      </dd>
+    </dl>
+  </section>
+
+  <aside>
+    <section class="panel">
+      <h2>AI assessment</h2>
+      {% if report.ai_result %}
+        <dl>
+          <dt>Issue clarity</dt><dd>{{ report.ai_result.get('issue_clarity', '') }}</dd>
+          <dt>Location quality</dt><dd>{{ report.ai_result.get('location_quality', '') }}</dd>
+          <dt>Date quality</dt><dd>{{ report.ai_result.get('date_quality', '') }}</dd>
+          <dt>Time quality</dt><dd>{{ report.ai_result.get('time_quality', '') }}</dd>
+          <dt>Safety category</dt><dd>{{ report.ai_result.get('safety_category', '') }}</dd>
+        </dl>
+      {% else %}
+        <p class="empty">No AI result yet.</p>
+      {% endif %}
+    </section>
+
+    <section class="panel">
+      <h2>Contact details</h2>
+      <dl>
+        <dt>Name</dt><dd>{{ report.reporter.get('name', '') }}</dd>
+        <dt>Email</dt><dd>{{ report.reporter.get('email', '') }}</dd>
+        <dt>NRIC/FIN</dt><dd>{{ report.masked_nric }}</dd>
+        <dt>Contact</dt><dd>{{ report.reporter.get('contact_type', '') }} {{ report.reporter.get('contact_number', '') }}</dd>
+      </dl>
+    </section>
+  </aside>
+</div>
+{% endblock %}

@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% import "_field.html" as field %}
+{% block title %}Report a workplace safety concern - SafeReport{% endblock %}
+
+{% block content %}
+<h1>Report a workplace safety concern</h1>
+<p class="lead">Tell us what you saw. Your report is checked straight away, and we will ask if anything needs clarifying.</p>
+
+{% if errors %}
+  <p class="notice notice-error" role="alert">Please fix the highlighted fields and submit again.</p>
+{% endif %}
+
+<form class="panel form" method="post" enctype="multipart/form-data" data-busy novalidate>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+  <fieldset>
+    <legend>Case details</legend>
+
+    {{ field.textarea('description', 'Describe the workplace safety and health lapse', values, errors, max_description) }}
+
+    <div class="field">
+      <label for="photos">Photos (optional)</label>
+      <input id="photos" name="photos" type="file" accept="{{ photo_types }}" multiple
+             {% if errors.get('photos') %}aria-invalid="true" aria-describedby="photos-error"{% endif %}>
+      <p class="hint">Up to {{ max_photos }} photos: .jpg, .jpeg or .png.</p>
+      {{ field.error(errors, 'photos') }}
+    </div>
+
+    <div class="field">
+      <label class="check">
+        <input type="checkbox" name="consent_for_image_use" value="yes"
+               {{ 'checked' if values.get('consent_for_image_use') == 'yes' }}>
+        I consent to the authorities using these photos when handling this report.
+      </label>
+      <p class="hint">Without consent the photos are stored but not sent for AI assessment.</p>
+    </div>
+
+    <div class="grid">
+      {{ field.text('workplace_name', 'Workplace name', values, errors, maxlength=max_name) }}
+      {{ field.text('workplace_location', 'Workplace location', values, errors, maxlength=max_location) }}
+      {{ field.text('incident_datetime', 'Date and time of incident', values, errors, type='datetime-local', max=now) }}
+      {{ field.select('reporter_profile', 'Your relationship to the workplace', profiles, values, errors) }}
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Contact details</legend>
+    <div class="grid">
+      {{ field.text('name', 'Name', values, errors, maxlength=max_name, autocomplete='name') }}
+      {{ field.text('nric_fin', 'NRIC/FIN', values, errors, maxlength=9, hint='For example S1234567D.') }}
+      {{ field.text('email', 'Email', values, errors, type='email', autocomplete='email') }}
+      {{ field.text('email_confirm', 'Re-enter email', values, errors, type='email', autocomplete='email') }}
+      {{ field.select('contact_type', 'Contact number type', contact_types, values, errors) }}
+      {{ field.text('contact_number', 'Contact number', values, errors, type='tel', autocomplete='tel',
+                    hint='8-digit Singapore number. Mobile starts with 8 or 9; home and office with 6.') }}
+    </div>
+  </fieldset>
+
+  <div class="actions">
+    <button class="button button-primary" type="submit">Submit report</button>
+    {% if is_admin %}<a class="button" href="{{ url_for('dashboard') }}">Cancel</a>{% endif %}
+  </div>
+</form>
+{% endblock %}
