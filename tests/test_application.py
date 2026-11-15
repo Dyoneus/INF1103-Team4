@@ -752,3 +752,89 @@ def test_existing_saved_clarification_function_delegates(monkeypatch):
         data_manager=main.data_manager,
     )
     application_class.return_value.clarify_report.assert_called_once_with()
+
+@pytest.fixture
+def menu_setup(assessment_setup):
+    application, io, ai, logic, data, report = assessment_setup
+
+    data.load_reports.return_value = []
+    io.get_menu_choice.return_value = "0"
+
+    application.process_new_report = Mock()
+    application.retry_failed_report = Mock()
+    application.clarify_report = Mock()
+
+    return application, io, data
+
+
+def test_menu_dispatches_workflows_on_the_same_application(menu_setup):
+    application, io, data = menu_setup
+    io.get_menu_choice.side_effect = ["1", "2", "3", "0"]
+
+    workflows = Mock()
+    workflows.attach_mock(application.process_new_report, "create")
+    workflows.attach_mock(application.retry_failed_report, "retry")
+    workflows.attach_mock(application.clarify_report, "clarify")
+
+    application.run()
+
+    assert workflows.mock_calls == [
+        call.create(),
+        call.retry(),
+        call.clarify(),
+    ]
+    data.load_reports.assert_called_once_with()
+    assert io.display_menu.call_count == 4
+    assert io.get_menu_choice.call_count == 4
+    io.display_processing_error.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "reports",
+    [[], [{"reference_id": "SAVED-001"}]],
+)
+def test_menu_exit_does_not_start_a_workflow(menu_setup, reports):
+    application, io, data = menu_setup
+    data.load_reports.return_value = reports
+
+    application.run()
+
+    data.load_reports.assert_called_once_with()
+    io.display_menu.assert_called_once_with()
+    io.get_menu_choice.assert_called_once_with()
+    application.process_new_report.assert_not_called()
+    application.retry_failed_report.assert_not_called()
+    application.clarify_report.assert_not_called()
+    io.display_processing_error.assert_not_called()
+
+
+def test_menu_load_failure_stops_before_showing_menu(menu_setup):
+    application, io, data = menu_setup
+    data.load_reports.return_value = None
+
+    application.run()
+
+    data.load_reports.assert_called_once_with()
+    io.display_processing_error.assert_called_once_with("LOAD_FAILED")
+    io.display_menu.assert_not_called()
+    io.get_menu_choice.assert_not_called()
+    application.process_new_report.assert_not_called()
+    application.retry_failed_report.assert_not_called()
+    application.clarify_report.assert_not_called()
+
+
+def test_existing_run_function_delegates(monkeypatch):
+    application_class = Mock()
+    monkeypatch.setattr(
+        main, "SafeReportApplication", application_class
+    )
+
+    main.run()
+
+    application_class.assert_called_once_with(
+        io_manager=main.io_manager,
+        ai_manager=main.ai_manager,
+        logic_manager=main.logic_manager,
+        data_manager=main.data_manager,
+    )
+    application_class.return_value.run.assert_called_once_with()
