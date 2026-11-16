@@ -146,6 +146,13 @@ def make_client(tmp_path):
     return factory
 
 
+def test_health_endpoint_returns_ok(make_client):
+    response = make_client().get("/health")
+
+    assert response.status_code == 200
+    assert response.get_json() == {"status": "ok"}
+
+
 # Dashboard
 
 def test_dashboard_lists_reports_with_status_and_location_ranking(make_client):

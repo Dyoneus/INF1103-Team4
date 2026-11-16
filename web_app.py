@@ -435,6 +435,7 @@ class SafeReportWebApp:
         add = self._flask.add_url_rule
         # Public: the report form is the home page.
         add("/", "new_report", self._new_report, methods=["GET", "POST"])
+        add("/health", "health", self._health)
         # Admins only.
         add("/admin", "dashboard", self._dashboard)
         add("/admin/login", "admin_login", self._admin_login, methods=["GET", "POST"])
@@ -451,6 +452,10 @@ class SafeReportWebApp:
             "is_admin": self._access.is_admin(),
         })
         self._flask.register_error_handler(413, self._upload_too_large)
+
+    @staticmethod
+    def _health():
+        return {"status": "ok"}
 
     # Cross-site request forgery protection
 
