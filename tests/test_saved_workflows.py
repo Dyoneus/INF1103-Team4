@@ -225,7 +225,7 @@ def test_menu_dispatches_saved_workflows(monkeypatch):
         lambda self: calls.append("clarify"),
     )
 
-    main.run()
+    main.SafeReportApplication.main()
 
     assert calls == ["retry", "clarify"]
     data_class.assert_called_once_with()
@@ -242,6 +242,7 @@ def test_script_entrypoints_open_menu(script, tmp_path):
     assert result.returncode == 0, result.stderr
     assert "2. Retry a failed assessment" in result.stdout
     assert "3. Clarify and reassess" in result.stdout
+    assert "4. Delete a saved report" in result.stdout
 
 def test_legacy_json_is_migrated_without_duplicates(tmp_path, monkeypatch, isolated_database):
     _, original = saved_report(
@@ -300,3 +301,76 @@ def test_data_manager_storage_dependency_injection(tmp_path, monkeypatch):
     assert manager.database is database
     assert manager.storage is storage
     assert manager.database_ready is True
+
+
+# Deleting a saved report
+
+def add_photo_folder(tmp_path):
+    photo = tmp_path / "photos" / "TEST-001" / "photo_1.png"
+    photo.parent.mkdir(parents=True)
+    photo.write_bytes(b"photo")
+    return photo
+
+
+def test_delete_removes_database_row_json_and_photos(
+    tmp_path, monkeypatch, application, isolated_database
+):
+    path, _ = saved_report(tmp_path, monkeypatch, isolated_database, "READY_FOR_REVIEW")
+    photo = add_photo_folder(tmp_path)
+    answer_with(monkeypatch, ["TEST-001", "y"])
+
+    application.delete_report()
+
+    assert isolated_database.load_reports() == []
+    assert not path.exists()
+    assert not photo.parent.exists()
+    # A fresh start must not import the report again from a leftover JSON file.
+    assert data_manager.DataManager(isolated_database.database).load_reports() == []
+
+
+def test_delete_declined_keeps_the_report(
+    tmp_path, monkeypatch, application, isolated_database
+):
+    path, original = saved_report(tmp_path, monkeypatch, isolated_database, "READY_FOR_REVIEW")
+    photo = add_photo_folder(tmp_path)
+    answer_with(monkeypatch, ["TEST-001", "n"])
+
+    application.delete_report()
+
+    assert isolated_database.load_reports() == [original]
+    assert path.is_file() and photo.is_file()
+
+
+@pytest.mark.parametrize("reference_id", ["MISSING-001", "", "../TEST-001", "..", None])
+def test_delete_rejects_unknown_or_unsafe_reference_ids(
+    tmp_path, monkeypatch, isolated_database, reference_id
+):
+    path, original = saved_report(tmp_path, monkeypatch, isolated_database, "READY_FOR_REVIEW")
+
+    assert isolated_database.delete_report(reference_id) is False
+    assert isolated_database.load_reports() == [original]
+    assert path.is_file()
+
+
+def test_delete_restores_database_row_when_json_cannot_be_removed(
+    tmp_path, monkeypatch, isolated_database
+):
+    path, original = saved_report(tmp_path, monkeypatch, isolated_database, "READY_FOR_REVIEW")
+    monkeypatch.setattr(
+        report_store.ReportStorage, "delete_report", lambda self, reference_id: False
+    )
+
+    assert isolated_database.delete_report("TEST-001") is False
+    assert isolated_database.load_reports() == [original]
+    assert path.is_file()
+
+
+def test_storage_delete_never_leaves_the_photos_folder(tmp_path):
+    storage = report_store.ReportStorage(tmp_path)
+    keep = tmp_path / "photos" / "KEEP-001" / "photo_1.png"
+    keep.parent.mkdir(parents=True)
+    keep.write_bytes(b"photo")
+
+    assert storage.delete_report("..") is True
+    assert storage.delete_report("MISSING-001") is True
+    assert keep.is_file()

@@ -219,6 +219,31 @@ class SafeReportApplication:
             report["assessment"],
         )
 
+    def delete_report(self):
+        #permanently delete a selected saved report after confirmation
+
+        reports = self._data.load_reports()
+
+        if reports is None:
+            self._io.display_processing_error("LOAD_FAILED")
+            return
+
+        report = self._io.select_saved_report(reports)
+
+        if report is None:
+            return
+
+        reference_id = report["reference_id"]
+
+        if not self._io.confirm_report_deletion(reference_id):
+            return
+
+        if not self._data.delete_report(reference_id):
+            self._io.display_processing_error("DELETE_FAILED")
+            return
+
+        self._io.display_report_deleted(reference_id)
+
     def run(self):
         #run the console menu using this application's managers
         if self._data.load_reports() is None:
@@ -238,18 +263,26 @@ class SafeReportApplication:
                 self.retry_failed_report()
             elif choice == "3":
                 self.clarify_report()
+            elif choice == "4":
+                self.delete_report()
 
-def run():
-    #create the managers and start the console application
+    @classmethod
+    def create_default(cls):
+        #build the application with one real instance of each manager
 
-    application = SafeReportApplication(
-        io_manager=io_manager.IOManager(),
-        ai_manager=ai_manager.AIManager(),
-        logic_manager=logic_manager.LogicManager(),
-        data_manager=data_manager.DataManager(),
-    )
-    return application.run()
+        return cls(
+            io_manager=io_manager.IOManager(),
+            ai_manager=ai_manager.AIManager(),
+            logic_manager=logic_manager.LogicManager(),
+            data_manager=data_manager.DataManager(),
+        )
+
+    @classmethod
+    def main(cls):
+        #console entry point: create the managers and start the menu
+
+        return cls.create_default().run()
 
 
 if __name__ == "__main__":
-    run()
+    SafeReportApplication.main()

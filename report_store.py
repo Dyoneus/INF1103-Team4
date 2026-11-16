@@ -1,6 +1,7 @@
 """JSON storage for SafeReport"""
 
 import json
+import logging
 import os
 import shutil
 import tempfile
@@ -68,6 +69,33 @@ class ReportStorage(StorageInterface):
 
         except (OSError, json.JSONDecodeError, UnicodeError):
             return None
+
+    def delete_report(self, reference_id):
+        """Remove a report's JSON file and its photo folder.
+
+        Returns False only when the JSON file exists but cannot be removed.
+        A leftover photo folder is logged, not treated as a failure.
+        """
+        report_path = self.reports_dir / f"{reference_id}.json"
+
+        try:
+            report_path.unlink(missing_ok=True)
+        except OSError:
+            return False
+
+        photos_root = (self.reports_dir / "photos").resolve()
+        photo_dir = (photos_root / reference_id).resolve()
+
+        # Only ever remove this report's own folder inside reports/photos.
+        if photo_dir.parent == photos_root and photo_dir.is_dir():
+            try:
+                shutil.rmtree(photo_dir)
+            except OSError as error:
+                logging.warning(
+                    "Could not remove photos for %s: %s", reference_id, error
+                )
+
+        return True
 
     def write_report(self, report_path, report):
         temp_file = None

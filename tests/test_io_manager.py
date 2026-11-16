@@ -193,8 +193,31 @@ def test_menu_lists_every_option(make_io):
     io.display_menu()
 
     for label in ("Create a new safety report", "Retry a failed assessment",
-                  "Clarify and reassess a saved report", "Exit"):
+                  "Clarify and reassess a saved report", "Delete a saved report", "Exit"):
         assert label in console.text
+
+
+@pytest.mark.parametrize("answers, expected", [
+    (["y"], True),
+    (["maybe", "n"], False),
+    ([KeyboardInterrupt()], False),
+    ([EOFError()], False),
+])
+def test_confirm_report_deletion_only_accepts_an_explicit_yes(make_io, answers, expected):
+    io, console = make_io(answers)
+
+    assert io.confirm_report_deletion("TEST-001") is expected
+    assert "TEST-001" in console.text
+
+
+def test_delete_messages_are_shown(make_io):
+    io, console = make_io()
+
+    io.display_report_deleted("TEST-001")
+    io.display_processing_error("DELETE_FAILED")
+
+    assert "Report TEST-001 and its photos were deleted." in console.text
+    assert "The report could not be deleted." in console.text
 
 
 # Displays

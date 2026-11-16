@@ -3,8 +3,8 @@
 Run it from the repository root with:  python web_app.py
 
 Classes
-    AccessControl     Decides who may see what: admins see every report, the
-                      public only the reports they submitted themselves.
+    AccessControl     Decides who may see what: admins see every report and may
+                      delete one, the public only the reports they submitted.
     WebNotifier       Collects the messages the console would print, so the
                       same assessment workflow can run behind a web page.
     ReportPresenter   Turns a stored report into values a template can show.
@@ -429,6 +429,30 @@ class SafeReportWebApp:
         # threaded=True keeps other pages responsive while one request waits for the AI.
         self._flask.run(host=host, port=port, debug=debug, threaded=True)
 
+    @classmethod
+    def from_environment(cls) -> "SafeReportWebApp":
+        """Build the web app on the real managers, configured from environment variables."""
+        import ai_manager
+        import data_manager
+        import logic_manager
+
+        return cls(
+            ai_manager=ai_manager.AIManager(),
+            logic_manager=logic_manager.LogicManager(),
+            data_manager=data_manager.DataManager(),
+            secret_key=os.environ.get("SAFEREPORT_SECRET_KEY"),
+            admin_username=os.environ.get("SAFEREPORT_ADMIN_USERNAME"),
+            admin_password=os.environ.get("SAFEREPORT_ADMIN_PASSWORD"),
+        )
+
+    @classmethod
+    def main(cls) -> None:
+        """Command-line entry point: serve the web interface."""
+        cls.from_environment().run(
+            host=os.environ.get("SAFEREPORT_HOST", "127.0.0.1"),
+            port=int(os.environ.get("SAFEREPORT_PORT", "5000")),
+        )
+
     # Setup
 
     def _register_routes(self) -> None:
@@ -440,6 +464,7 @@ class SafeReportWebApp:
         add("/admin", "dashboard", self._dashboard)
         add("/admin/login", "admin_login", self._admin_login, methods=["GET", "POST"])
         add("/admin/logout", "admin_logout", self._admin_logout, methods=["POST"])
+        add("/reports/<reference_id>/delete", "delete_report", self._delete_report, methods=["POST"])
         # Admins, and the person who submitted that report from this browser.
         add("/reports/<reference_id>", "report_detail", self._report_detail)
         add("/reports/<reference_id>/retry", "retry_report", self._retry_report, methods=["POST"])
@@ -604,6 +629,18 @@ class SafeReportWebApp:
         self._assess(reference_id, report)
         return redirect(url_for("report_detail", reference_id=reference_id))
 
+    def _delete_report(self, reference_id: str):
+        if not self._access.is_admin():
+            return self._refuse_access()
+        self._find_report(reference_id)
+
+        if not self._data.delete_report(reference_id):
+            flash(PROCESSING_ERROR_MESSAGES["DELETE_FAILED"], "error")
+            return redirect(url_for("report_detail", reference_id=reference_id))
+
+        flash(f"Report {reference_id} and its photos were deleted.", "success")
+        return redirect(url_for("dashboard"))
+
     def _report_photo(self, reference_id: str, number: int):
         if not self._access.can_view(reference_id):
             abort(404)
@@ -674,26 +711,5 @@ class SafeReportWebApp:
         )
 
 
-def create_app() -> Flask:
-    """Build the web app on the real managers (also used by `flask --app web_app run`)."""
-    import ai_manager
-    import data_manager
-    import logic_manager
-
-    web_app = SafeReportWebApp(
-        ai_manager=ai_manager.AIManager(),
-        logic_manager=logic_manager.LogicManager(),
-        data_manager=data_manager.DataManager(),
-        secret_key=os.environ.get("SAFEREPORT_SECRET_KEY"),
-        admin_username=os.environ.get("SAFEREPORT_ADMIN_USERNAME"),
-        admin_password=os.environ.get("SAFEREPORT_ADMIN_PASSWORD"),
-    )
-    return web_app.flask_app
-
-
 if __name__ == "__main__":
-    create_app().run(
-        host=os.environ.get("SAFEREPORT_HOST", "127.0.0.1"),
-        port=int(os.environ.get("SAFEREPORT_PORT", "5000")),
-        threaded=True,
-    )
+    SafeReportWebApp.main()

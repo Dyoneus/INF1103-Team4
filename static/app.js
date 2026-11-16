@@ -8,6 +8,15 @@ document.querySelectorAll("form[data-busy]").forEach(function (form) {
   });
 });
 
+// Ask before a destructive action such as deleting a report.
+document.querySelectorAll("form[data-confirm]").forEach(function (form) {
+  form.addEventListener("submit", function (event) {
+    if (!window.confirm(form.dataset.confirm)) {
+      event.preventDefault();
+    }
+  });
+});
+
 // Coming back with the browser's Back button must not leave the overlay up.
 window.addEventListener("pageshow", function () {
   document.getElementById("busy").hidden = true;

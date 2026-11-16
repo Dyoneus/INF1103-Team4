@@ -14,3 +14,7 @@ class StorageInterface(ABC):
     @abstractmethod
     def write_report(self, report_path, report):
         pass
+
+    @abstractmethod
+    def delete_report(self, reference_id):
+        pass

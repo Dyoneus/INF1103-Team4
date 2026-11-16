@@ -42,6 +42,7 @@ MENU_OPTIONS = {
     "1": "Create a new safety report",
     "2": "Retry a failed assessment",
     "3": "Clarify and reassess a saved report",
+    "4": "Delete a saved report",
     "0": "Exit",
 }
 
@@ -111,6 +112,7 @@ PROCESSING_ERROR_MESSAGES = {
     "AI_FAILED": "AI processing could not be completed. Please try again later.",
     "SAVE_FAILED": "The report could not be saved.",
     "LOAD_FAILED": "Saved reports could not be loaded.",
+    "DELETE_FAILED": "The report could not be deleted.",
 }
 
 # Errors after which the report is saved but has no assessment yet.
@@ -233,6 +235,9 @@ class ReportView:
 
     def display_report_reference(self, reference_id: str) -> None:
         self._show(f"\nReport saved locally. Reference ID: {reference_id}")
+
+    def display_report_deleted(self, reference_id: str) -> None:
+        self._show(f"\nReport {reference_id} and its photos were deleted.")
 
     def display_saved_reports(self, reports: list[dict]) -> None:
         self._show("\nSaved reports:")
@@ -510,7 +515,7 @@ class IOManager:
 
             if choice in MENU_OPTIONS:
                 return choice
-            self._prompter.show("Invalid choice. Please enter 0, 1, 2 or 3.")
+            self._prompter.show("Invalid choice. Please enter 0, 1, 2, 3 or 4.")
 
     def select_saved_report(self, reports: list[dict]) -> dict | None:
         """Select a report by number or reference ID; return None if cancelled."""
@@ -534,6 +539,15 @@ class IOManager:
                     return report
             self._prompter.show("Please select one of the listed reports.")
 
+    def confirm_report_deletion(self, reference_id: str) -> bool:
+        """Ask before a report is permanently deleted; cancelling counts as no."""
+        try:
+            return self._prompter.ask_yes_no(
+                f"Permanently delete report {reference_id} and its photos?")
+        except CANCEL_KEYS:
+            self._prompter.show("\nDeletion cancelled.")
+            return False
+
     # Report entry
 
     def collect_report(self) -> dict | None:
@@ -549,6 +563,9 @@ class IOManager:
 
     def display_report_reference(self, reference_id: str) -> None:
         self._view.display_report_reference(reference_id)
+
+    def display_report_deleted(self, reference_id: str) -> None:
+        self._view.display_report_deleted(reference_id)
 
     def display_assessment_result(self, assessment: dict) -> None:
         self._view.display_assessment_result(assessment)
