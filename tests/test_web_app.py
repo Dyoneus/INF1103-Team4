@@ -50,12 +50,11 @@ class FakeAI:
         self.calls = []
         self.photos_existed = []
 
-    def get_client(self):
+    def ensure_ready(self):
         if not self.configured:
             raise RuntimeError("GROQ_API_KEY is not configured.")
-        return object()
 
-    def analyze_incident(self, client, incident_report, photo_paths=None):
+    def analyze_incident(self, incident_report, photo_paths=None):
         self.calls.append((incident_report, list(photo_paths or [])))
         self.photos_existed.append([Path(path).is_file() for path in photo_paths or []])
         if self.fails:
@@ -617,3 +616,21 @@ def test_uploads_are_removed_even_if_the_request_fails():
             raise RuntimeError("boom")
 
     assert not Path(paths[0]).exists()
+
+def test_create_app_supplies_ai_manager_instance(monkeypatch):
+    from unittest.mock import Mock
+    import ai_manager
+    import web_app
+
+    ai = Mock(spec=ai_manager.AIManager)
+    ai_class = Mock(return_value=ai)
+    web_class = Mock()
+
+    monkeypatch.setattr(ai_manager, "AIManager", ai_class)
+    monkeypatch.setattr(web_app, "SafeReportWebApp", web_class)
+
+    flask_app = web_app.create_app()
+
+    ai_class.assert_called_once_with()
+    assert web_class.call_args.kwargs["ai_manager"] is ai
+    assert flask_app is web_class.return_value.flask_app

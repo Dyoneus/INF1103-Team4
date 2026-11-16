@@ -676,7 +676,7 @@ def create_app() -> Flask:
     import logic_manager
 
     web_app = SafeReportWebApp(
-        ai_manager=ai_manager,
+        ai_manager=ai_manager.AIManager(),
         logic_manager=logic_manager.LogicManager(),
         data_manager=data_manager,
         secret_key=os.environ.get("SAFEREPORT_SECRET_KEY"),

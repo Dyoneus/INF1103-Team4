@@ -43,16 +43,16 @@ def test_report_needs_clarification(monkeypatch):
 
     #prevent a real Groq API call
     monkeypatch.setattr(
-        main.ai_manager, "get_client", lambda: object()
+        main.ai_manager.AIManager, "ensure_ready", lambda self: None
     )
 
-    def fake_analyze(client, incident_data, photo_paths):
+    def fake_analyze(self, incident_data, photo_paths):
         assert "reporter" not in incident_data
         assert photo_paths == []
         return ai_fields
 
     monkeypatch.setattr(
-        main.ai_manager, "analyze_incident", fake_analyze
+        main.ai_manager.AIManager, "analyze_incident", fake_analyze
     )
 
     #capture what Data Manager would save
@@ -197,12 +197,12 @@ def test_other_readiness_statuses(
 
     # Simulate AI without calling Groq
     monkeypatch.setattr(
-        main.ai_manager, "get_client", lambda: object()
+        main.ai_manager.AIManager, "ensure_ready", lambda self: None
     )
 
     monkeypatch.setattr(
-        main.ai_manager, "analyze_incident",
-        lambda client, incident_data, photo_paths: ai_fields
+        main.ai_manager.AIManager, "analyze_incident",
+        lambda self, incident_data, photo_paths: ai_fields
     )
 
     # Capture Data Manager's result
@@ -263,12 +263,12 @@ def test_clarification_loop_reassesses_report(monkeypatch):
 
     ai_calls = {"count": 0}
 
-    def fake_analyze(client, incident_data, photo_paths):
+    def fake_analyze(self, incident_data, photo_paths):
         ai_calls["count"] += 1
         return first_ai_fields if ai_calls["count"] == 1 else second_ai_fields
 
-    monkeypatch.setattr(main.ai_manager, "get_client", lambda: object())
-    monkeypatch.setattr(main.ai_manager, "analyze_incident", fake_analyze)
+    monkeypatch.setattr(main.ai_manager.AIManager, "ensure_ready", lambda self: None)
+    monkeypatch.setattr(main.ai_manager.AIManager, "analyze_incident", fake_analyze)
     monkeypatch.setattr(main.data_manager, "save_report", lambda *args: True)
     monkeypatch.setattr(main.data_manager, "save_clarifications", lambda *args: True)
     monkeypatch.setattr(main.io_manager, "display_assessment_result", lambda assessment: None)
@@ -335,13 +335,13 @@ def test_save_failure(monkeypatch):
 
     # Simulate AI processing
     monkeypatch.setattr(
-        main.ai_manager, "get_client",
-        lambda: object()
+        main.ai_manager.AIManager, "ensure_ready",
+        lambda self: None
     )
 
     monkeypatch.setattr(
-        main.ai_manager, "analyze_incident",
-        lambda client, incident_data, photo_paths: ai_fields
+        main.ai_manager.AIManager, "analyze_incident",
+        lambda self, incident_data, photo_paths: ai_fields
     )
 
     # Simulate Data Manager failing to save
@@ -407,11 +407,11 @@ def test_raw_report_save_failure(monkeypatch):
     )
 
     # ai should not run when saving the raw report fails
-    def unexpected_ai_call():
+    def unexpected_ai_call(self):
         raise AssertionError("AI should not be called")
 
     monkeypatch.setattr(
-        main.ai_manager, "get_client",
+        main.ai_manager.AIManager, "ensure_ready",
         unexpected_ai_call
     )
 

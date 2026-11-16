@@ -54,22 +54,22 @@ def answer_with(monkeypatch, answers):
 
 
 def successful_ai(monkeypatch):
-    monkeypatch.setattr(ai_manager, "get_client", lambda: None)
-    monkeypatch.setattr(ai_manager, "analyze_incident", lambda *args: FIELDS)
+    monkeypatch.setattr(ai_manager.AIManager, "ensure_ready", lambda self: None)
+    monkeypatch.setattr(ai_manager.AIManager, "analyze_incident", lambda *args: FIELDS)
 
 
 def test_retry_updates_original_record(tmp_path, monkeypatch):
     path, original = saved_report(tmp_path, monkeypatch, "AI_FAILED")
     answer_with(monkeypatch, ["TEST-001"])
-    monkeypatch.setattr(ai_manager, "get_client", lambda: None)
+    monkeypatch.setattr(ai_manager.AIManager, "ensure_ready", lambda self: None)
 
-    def analyze(client, details, photos):
+    def analyze(self, details, photos):
         assert "reporter" not in details
         assert "photos" not in details
         assert photos == []  # Consent is still honoured during retries.
         return FIELDS
 
-    monkeypatch.setattr(ai_manager, "analyze_incident", analyze)
+    monkeypatch.setattr(ai_manager.AIManager, "analyze_incident", analyze)
     main.retry_failed_report()
     result = json.loads(path.read_text(encoding="utf-8"))
     assert result["assessment"]["status"] == "READY_FOR_REVIEW"
@@ -85,9 +85,9 @@ def test_clarification_saves_before_ai_and_reassesses(tmp_path, monkeypatch):
         tmp_path, monkeypatch, "NEEDS_CLARIFICATION", ["CLARIFY_LOCATION"]
     )
     answer_with(monkeypatch, ["1", "Block 30, third floor, north stairwell"])
-    monkeypatch.setattr(ai_manager, "get_client", lambda: None)
+    monkeypatch.setattr(ai_manager.AIManager, "ensure_ready", lambda self: None)
 
-    def analyze(client, details, photos):
+    def analyze(self, details, photos):
         stored = json.loads(path.read_text(encoding="utf-8"))
         assert stored["assessment"]["status"] == "AI_FAILED"
         assert stored["ai_result"] is None
@@ -95,7 +95,7 @@ def test_clarification_saves_before_ai_and_reassesses(tmp_path, monkeypatch):
         assert "north stairwell" in details["workplace_location"]
         return FIELDS
 
-    monkeypatch.setattr(ai_manager, "analyze_incident", analyze)
+    monkeypatch.setattr(ai_manager.AIManager, "analyze_incident", analyze)
     main.clarify_report()
     result = json.loads(path.read_text(encoding="utf-8"))
     assert result["assessment"] == {"status": "READY_FOR_REVIEW", "clarification_codes": []}
@@ -109,10 +109,10 @@ def test_corrections_survive_ai_failure_and_can_be_retried(tmp_path, monkeypatch
     path, _ = saved_report(tmp_path, monkeypatch, "INCOMPLETE", ["CLARIFY_OBSERVATION"])
     answer_with(monkeypatch, ["1", "Sparks are coming from an exposed cable."])
 
-    def missing_client():
+    def missing_client(self):
         raise RuntimeError("Missing API key")
 
-    monkeypatch.setattr(ai_manager, "get_client", missing_client)
+    monkeypatch.setattr(ai_manager.AIManager, "ensure_ready", missing_client)
     main.clarify_report()
     result = json.loads(path.read_text(encoding="utf-8"))
     assert result["case_details"]["description"].startswith("Sparks")
@@ -148,11 +148,11 @@ def test_failed_correction_save_keeps_original_and_skips_ai(tmp_path, monkeypatc
     def cannot_replace(*args):
         raise OSError("Disk unavailable")
 
-    def unexpected_ai():
+    def unexpected_ai(self):
         pytest.fail("AI must not run before corrections are saved")
 
     monkeypatch.setattr(data_manager.os, "replace", cannot_replace)
-    monkeypatch.setattr(ai_manager, "get_client", unexpected_ai)
+    monkeypatch.setattr(ai_manager.AIManager, "ensure_ready", unexpected_ai)
     main.clarify_report()
     assert path.read_bytes() == before
     assert not list(tmp_path.glob("*.tmp"))

@@ -47,7 +47,7 @@ class SafeReportApplication:
         #assess a saved report using the supplied managers
 
         try:
-            client = self._ai.get_client()
+            self._ai.ensure_ready()
         except RuntimeError:
             self.handle_ai_failure(reference_id, "CONFIG_MISSING")
             return
@@ -67,7 +67,7 @@ class SafeReportApplication:
 
         try:
             ai_fields = self._ai.analyze_incident(
-                client, incident_data, photo_paths
+                incident_data, photo_paths
             )
         except RuntimeError:
             self.handle_ai_failure(reference_id, "AI_FAILED")
@@ -240,7 +240,7 @@ def handle_ai_failure(reference_id, error_code):
 
     application = SafeReportApplication(
         io_manager=io_manager,
-        ai_manager=ai_manager,
+        ai_manager=ai_manager.AIManager(),
         logic_manager=logic_manager.LogicManager(),
         data_manager=data_manager,
     )
@@ -251,7 +251,7 @@ def process_new_report():
     #bridge existing workflows to the application during migration
     application = SafeReportApplication(
         io_manager=io_manager,
-        ai_manager=ai_manager,
+        ai_manager=ai_manager.AIManager(),
         logic_manager=logic_manager.LogicManager(),
         data_manager=data_manager,
     )
@@ -262,7 +262,7 @@ def assess_report(reference_id, report):
     #bridge existing workflows to the application during migration
     application = SafeReportApplication(
         io_manager=io_manager,
-        ai_manager=ai_manager,
+        ai_manager=ai_manager.AIManager(),
         logic_manager=logic_manager.LogicManager(),
         data_manager=data_manager,
     )
@@ -274,7 +274,7 @@ def run_clarification_loop(reference_id, report, assessment):
 
     application = SafeReportApplication(
         io_manager=io_manager,
-        ai_manager=ai_manager,
+        ai_manager=ai_manager.AIManager(),
         logic_manager=logic_manager.LogicManager(),
         data_manager=data_manager,
     )
@@ -288,7 +288,7 @@ def retry_failed_report():
 
     application = SafeReportApplication(
         io_manager=io_manager,
-        ai_manager=ai_manager,
+        ai_manager=ai_manager.AIManager(),
         logic_manager=logic_manager.LogicManager(),
         data_manager=data_manager,
     )
@@ -300,7 +300,7 @@ def clarify_report():
     
     application = SafeReportApplication(
         io_manager=io_manager,
-        ai_manager=ai_manager,
+        ai_manager=ai_manager.AIManager(),
         logic_manager=logic_manager.LogicManager(),
         data_manager=data_manager,
     )
@@ -310,7 +310,7 @@ def run():
     #create the application using the current manager interfaces
     application = SafeReportApplication(
         io_manager=io_manager,
-        ai_manager=ai_manager,
+        ai_manager=ai_manager.AIManager(),
         logic_manager=logic_manager.LogicManager(),
         data_manager=data_manager,
     )
