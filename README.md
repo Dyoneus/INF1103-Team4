@@ -1,6 +1,20 @@
 # SafeReport
 
-SafeReport is a terminal application for recording workplace safety reports. It validates report details and stores each submitted report and any attached photos as JSON and image files.
+SafeReport records workplace safety reports and checks whether each one has enough detail to be followed up. Every report is sent to an AI model, which grades the description (issue clarity, location, date, time, safety category and, when photos are attached, whether they match). Business rules then turn those grades into a status: `READY_FOR_REVIEW`, `NEEDS_CLARIFICATION`, `INCOMPLETE` or `AI_FAILED`.
+
+It runs as a terminal menu (`python main.py`) or a Flask web interface (`python web_app.py`). Both use the same four managers and the same data, which is stored in a SQLite database with a JSON copy of each report and its photos.
+
+## Architecture
+
+The application is object-oriented. `SafeReportApplication` (`main.py`) is given one instance of each manager and coordinates the workflows.
+
+| Responsibility | File | Main classes |
+|---|---|---|
+| IO Manager | `io_manager.py`, `validators.py` | `IOManager` (owns `ConsolePrompter`, `ReportView`, `ReportForm`); `Validator` abstract base class and its subclasses |
+| AI Manager | `ai_manager.py` | `AIManager`; `AIProvider` interface with `GroqProvider`, `OpenAIProvider`, `GeminiProvider`; `ProviderFactory`, `PromptBuilder`, `ResponseValidator`, `PhotoLoader` |
+| Logic Manager | `logic_manager.py` | `LogicManager` (status rules, clarification codes, location ranking) |
+| Data Manager | `data_manager.py`, `database_manager.py`, `report_store.py`, `storage_interface.py` | `DataManager`; `DatabaseManager` (SQLite); `ReportStorage`, which implements `StorageInterface` |
+| Web interface | `web_app.py` | `SafeReportWebApp`, `AccessControl`, `WebReportForm`, `WebNotifier` |
 
 ## Requirements
 
@@ -24,9 +38,9 @@ On macOS or Linux, activate the virtual environment with:
 source .venv/bin/activate
 ```
 
-Submitted reports and copied photos are saved under `reports/`. That directory is local application data and is excluded from Git.
+Reports are stored in a SQLite database at `data/safereport.db` (change the location with `SAFEREPORT_DATABASE_PATH`). A JSON copy of each report and its photos is saved under `reports/`. Both folders are local application data and are excluded from Git.
 
-Both `python main.py` open the SafeReport menu:
+`python main.py` opens the SafeReport menu:
 
 - **1. Create a new safety report** saves the report and assesses its readiness.
 - **2. Retry a failed assessment** lists failed reports. Select a number or reference ID to retry and update that same report.
@@ -144,7 +158,7 @@ SafeReport includes automated tests for the four managers and the main applicati
 
 `test_script.py` demonstrates the business rules implemented in `logic_manager.py` using predefined AI outputs.
 
-The 8 test cases cover:
+The 12 test cases cover:
 - Reports ready for review
 - Approximate date and time
 - Unclear safety observations
@@ -153,6 +167,10 @@ The 8 test cases cover:
 - Missing dates
 - Missing times
 - Multiple missing fields and rule priority
+- Photos that do not match the description
+- Photos that match the description
+- Rule priority when a photo does not match and the issue is unclear
+- Invalid `photo_match` values from the AI
 
 Run the business rule test script:
 
@@ -160,7 +178,7 @@ Run the business rule test script:
 python -m pytest test_script.py -v
 ```
 
-These tests run offline without calling Groq or requiring an API key.
+These tests run offline without calling an AI provider or requiring an API key.
 
 ### Complete Test Suite
 
@@ -170,23 +188,44 @@ Run all automated tests:
 python -m pytest tests test_script.py -q
 ```
 
-The complete suite checks input validation, AI response handling, business rules, JSON persistence, and application workflows.
+The complete suite checks input validation, AI response handling and provider failover, business rules, JSON and SQLite persistence (including corrupt files and rollback), the application workflows, and the web interface.
 
 ### Individual Manager Tests
 
 To test a specific module:
 
 ```powershell
-python -m pytest tests/test_ai_manager.py -v
-python -m pytest tests/test_io_manager.py -v
-python -m pytest tests/test_main.py -v
+python -m pytest tests/test_ai_manager.py tests/test_ai_manager_oop.py -v
+python -m pytest tests/test_io_manager.py tests/test_validators.py -v
+python -m pytest tests/test_database_crud.py -v
+python -m pytest tests/test_main.py tests/test_application.py -v
 python -m pytest tests/test_web_app.py -v
 ```
 
-The automated tests use simulated AI responses rather than making live Groq API requests.
+The automated tests use simulated AI responses rather than making live AI API requests.
 
-To Run the AI manager tests in Docker:
+### Run the tests in Docker
+
+No API key or `.env` file is needed. From the repository root, build the image and run the complete suite inside it:
 
 ```sh
-docker compose run --rm --entrypoint python safereport tests/test_ai_manager.py
+docker compose build
+docker run --rm -e SAFEREPORT_DATABASE_PATH=/tmp/safereport-test.db safereport:local python -m pytest tests test_script.py -q
 ```
+
+`SAFEREPORT_DATABASE_PATH` points the tests at a throwaway database inside the container, so they do not touch your saved reports.
+
+## Continuous integration and deployment
+
+Both workflows are GitHub Actions files in `.github/workflows/`.
+
+**CI (`ci.yml`)** runs on every push to `main` and every pull request into `main`. It:
+
+1. installs the dependencies on Python 3.12 and runs `python -m pytest tests test_script.py -q`;
+2. builds the Docker image with `docker compose build web`;
+3. runs the same test suite inside the built image;
+4. starts the web container and waits for its `/health` check to pass.
+
+Results appear under the repository's **Actions** tab and next to each commit and pull request.
+
+**CD (`cd.yml`)** runs when a GitHub Release is published. It runs the tests, builds the image, runs the tests again inside that image, and then pushes it to the GitHub Container Registry as `ghcr.io/<owner>/<repository>:<release tag>`.
