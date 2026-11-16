@@ -51,6 +51,13 @@ from groq import Groq
 
 import io_manager
 
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:
+    pass
+
 logger = logging.getLogger(__name__)
 
 EXTRACTED_FIELDS = [
@@ -59,7 +66,10 @@ EXTRACTED_FIELDS = [
     "date_quality",
     "time_quality",
     "safety_category",
+    "photo_match",
 ]
+
+PHOTO_ONLY_FIELDS = {"photo_match"}
 
 ALLOWED_VALUES = {
     "issue_clarity": ["CLEAR", "UNCLEAR"],
@@ -77,6 +87,7 @@ ALLOWED_VALUES = {
         "OTHER",
         "UNCLEAR",
     ],
+    "photo_match": ["MATCHED", "UNMATCHED"],
 }
 
 
@@ -84,10 +95,10 @@ ALLOWED_VALUES = {
 class AIConfig:
     """Vendor-neutral settings (frozen = cannot change by accident)."""
 
-    max_attempts: int = 3        # tries for the LAST provider (first try + retries)
-    fallback_attempts: int = 1   # tries for a provider that has another one behind it
-    request_timeout: int = 30    # seconds per API call
-    max_backoff: int = 30        # cap on any single wait between attempts
+    max_attempts: int = 3         # tries for the LAST provider (first try + retries)
+    fallback_attempts: int = 2    # tries for a provider that has another one behind it
+    request_timeout: int = 90     # seconds per API call (vision + Gemini need >30s)
+    max_backoff: int = 30         # cap on any single wait between attempts
 
 
 # Old constant names, so other modules and tests that read them still work.
@@ -171,13 +182,22 @@ class ChatCompletionsProvider(AIProvider):
             for url in image_urls
         ]
 
+        request_kwargs = {
+            "model": self._model,
+            "messages": [{"role": "user", "content": content}],
+            "temperature": 0,
+            "response_format": {"type": "json_object"},
+        }
+
         try:
-            response = client.chat.completions.create(
-                model=self._model,
-                messages=[{"role": "user", "content": content}],
-                temperature=0,
-                response_format={"type": "json_object"},
-            )
+            try:
+                response = client.chat.completions.create(**request_kwargs)
+            except sdk.APIStatusError as exc:
+                if exc.status_code == 400 and "response_format" in str(exc).lower():
+                    request_kwargs.pop("response_format")
+                    response = client.chat.completions.create(**request_kwargs)
+                else:
+                    raise
         except (
             sdk.APIConnectionError,   # includes timeouts
             sdk.RateLimitError,
@@ -187,8 +207,9 @@ class ChatCompletionsProvider(AIProvider):
                 str(exc), retry_after=self._retry_after(exc)
             ) from exc
         except sdk.APIStatusError as exc:
+            detail = getattr(getattr(exc, "response", None), "text", "")
             raise ProviderError(
-                f"Non-retryable API error (HTTP {exc.status_code}): {exc}"
+                f"Non-retryable API error (HTTP {exc.status_code}): {exc} {detail}".strip()
             ) from exc
 
         if not response.choices:
@@ -217,8 +238,11 @@ class GroqProvider(ChatCompletionsProvider):
 
     @classmethod
     def from_env(cls, client=None, timeout=REQUEST_TIMEOUT):
-        return cls(model=os.environ.get("GROQ_MODEL") or None,
-                   client=client, timeout=timeout)
+        return cls(
+            model=os.environ.get("GROQ_MODEL") or None,
+            client=client,
+            timeout=timeout,
+        )
 
     def _sdk(self):
         return groq
@@ -413,27 +437,41 @@ class ResponseValidator:
     def allowed_values(self):
         return self._allowed
 
-    def validate(self, text):
+    def expected_fields(self, has_photos=False):
+        """Return the active schema fields based on whether photos were sent."""
+        if has_photos:
+            return list(self._fields)
+        return [f for f in self._fields if f not in PHOTO_ONLY_FIELDS]
+
+    def validate(self, text, has_photos=False):
         """Validate the AI response and return the required structured fields."""
         if not isinstance(text, str):
             raise ValueError("AI response must be a string.")
 
+        cleaned = text.strip()
+        if cleaned.startswith("```"):
+            lines = cleaned.splitlines()
+            if len(lines) >= 2 and lines[-1].strip() == "```":
+                cleaned = "\n".join(lines[1:-1]).strip()
+
         try:
-            data = json.loads(text)
+            data = json.loads(cleaned)
         except json.JSONDecodeError as exc:
             raise ValueError("AI returned invalid JSON.") from exc
 
         if not isinstance(data, dict):
             raise ValueError("AI response must be a JSON object.")
 
+        active_fields = self.expected_fields(has_photos=has_photos)
+
         # Reject extra keys too, so the output matches the schema exactly.
-        unexpected = [field for field in data if field not in self._fields]
+        unexpected = [field for field in data if field not in active_fields]
         if unexpected:
             raise ValueError(
                 f"AI response contains unexpected fields: {unexpected}"
             )
 
-        missing = [f for f in self._fields if f not in data]
+        missing = [f for f in active_fields if f not in data]
         if missing:
             raise ValueError(
                 f"AI response is missing required fields: {missing}"
@@ -441,7 +479,7 @@ class ResponseValidator:
 
         validated = {}
 
-        for field in self._fields:
+        for field in active_fields:
             value = data[field]
 
             if not isinstance(value, str):
@@ -478,22 +516,31 @@ class PromptBuilder:
             indent=2,
         )
 
+        active_fields = (
+            list(self._fields)
+            if photo_count > 0
+            else [f for f in self._fields if f not in PHOTO_ONLY_FIELDS]
+        )
+
         allowed_section = "\n\n".join(
             f"{field}:\n" + "\n".join(f"- {v}" for v in self._allowed[field])
-            for field in self._fields
+            for field in active_fields
         )
 
         photo_section = ""
         if photo_count:
             photo_section = f"""Photos:
 {photo_count} photo(s) of the observation are attached to this request.
+- Compare the attached photo(s) against the user's written description and set
+  photo_match to MATCHED if the visual evidence aligns with the described
+  safety issue or scene. Set photo_match to UNMATCHED if the photo contradicts
+  the description, shows an unrelated scene, or does not support the written report.
 - Use them together with the written text to judge issue_clarity and
   safety_category. A photo that clearly shows a hazard can make a short
   description CLEAR, and a visible hazard can decide the safety_category.
 - Judge location_quality, date_quality and time_quality from the written
   report only. Do not infer them from the photos.
-- If a photo is unreadable or unrelated to workplace safety, ignore it.
-  Do not invent details that are not visible.
+- Do not invent details that are not visible.
 
 """
 
@@ -505,7 +552,7 @@ Your task is to assess the clarity and completeness of the information
 provided and organise it into the required structured fields.
 
 Return ONLY one valid JSON object containing exactly these fields:
-{json.dumps(self._fields)}
+{json.dumps(active_fields)}
 
 Use only the following allowed values:
 
@@ -522,21 +569,21 @@ Rules:
 4. Set location_quality to MISSING when no location is provided.
    Use ADEQUATE when the location is sufficiently specific for follow-up.
    Use VAGUE when a location is provided but is not sufficiently specific.
-4. Set date_quality to MISSING when no date information is provided.
+5. Set date_quality to MISSING when no date information is provided.
    Use EXACT when a specific calendar date is given.
    Use APPROXIMATE when only relative or imprecise date information is given.
-5. Set time_quality to MISSING when no time information is provided.
+6. Set time_quality to MISSING when no time information is provided.
    Use EXACT when a specific time is given.
    Use APPROXIMATE when only a general period, such as morning or
    afternoon, is provided.
-6. Choose the safety_category that best describes the concern.
-7. Use OTHER when the concern is understandable but does not fit
+7. Choose the safety_category that best describes the concern.
+8. Use OTHER when the concern is understandable but does not fit
    another listed category.
-8. Use UNCLEAR for safety_category when the concern cannot be identified
+9. Use UNCLEAR for safety_category when the concern cannot be identified
    from the available information.
-9. Do not invent missing information.
-10. Return only the five required fields and use only their allowed values.
-11. Do not provide explanations, recommendations, severity assessments,
+10. Do not invent missing information.
+11. Return only the {len(active_fields)} required fields and use only their allowed values.
+12. Do not provide explanations, recommendations, severity assessments,
     injury assessments, or additional fields.
 
 {photo_section}Incident report:
@@ -737,6 +784,7 @@ class AIManager:
     def _analyze_with(self, provider, prompt, image_urls, max_attempts):
         """Try one provider up to max_attempts times; raise RuntimeError if it fails."""
         last_error = None
+        has_photos = bool(image_urls)
 
         for attempt in range(1, max_attempts + 1):
             try:
@@ -746,7 +794,7 @@ class AIManager:
                     raise ValueError("AI returned an empty response.")
 
                 # Preserve the AI classification; the Logic Manager decides readiness.
-                return self._validator.validate(text)
+                return self._validator.validate(text, has_photos=has_photos)
 
             except (ValueError, RetryableProviderError) as exc:
                 last_error = exc
@@ -770,13 +818,21 @@ class AIManager:
         ) from last_error
 
     def make_result(self, reference_id, fields=None, error=None):
-        """Every report yields the same keys, success or failure."""
+        """Build the output dict for one report.
+
+        Photo-only fields (such as photo_match) are omitted completely when
+        no photo was analyzed.
+        """
         result = {
             "reference_id": reference_id,
             "status": "error" if error else "success",
         }
 
         for field in self._validator.fields:
+            if field in PHOTO_ONLY_FIELDS and (
+                error or not fields or field not in fields
+            ):
+                continue
             result[field] = fields[field] if fields and not error else None
 
         result["error"] = str(error) if error else None
@@ -906,8 +962,8 @@ def get_client():
     return manager
 
 
-def validate_response(text):
-    return ResponseValidator().validate(text)
+def validate_response(text, has_photos=False):
+    return ResponseValidator().validate(text, has_photos=has_photos)
 
 
 def build_prompt(incident_report, photo_count=0):
