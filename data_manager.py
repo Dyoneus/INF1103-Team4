@@ -15,6 +15,13 @@ class DataManager:
         self.database = database
         self.database_ready = self.database.initialize_database()
 
+        # Import legacy JSON reports once at startup, so later reads
+        # can go straight to SQLite.
+        self.legacy_import_ok = self.migrate_reports()
+
+        if self.database_ready and not self.legacy_import_ok:
+            print("Warning: some legacy JSON reports could not be imported.")
+
     def migrate_reports(self):
         if not self.database_ready:
             return False
@@ -63,11 +70,12 @@ class DataManager:
             return False
     
     def load_reports(self):
-           # Import legacy JSON reports before reading SQLite."""
-            if not self.migrate_reports():
-                return None
+        # Read directly from SQLite. Legacy JSON reports are imported
+        # once at startup by migrate_reports().
+        if not self.database_ready:
+            return None
 
-            return self.database.load_reports()
+        return self.database.load_reports()
 
     def filter_by_status(self, status):
         reports = self.load_reports()
