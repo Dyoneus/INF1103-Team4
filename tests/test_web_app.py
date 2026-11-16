@@ -650,3 +650,49 @@ def test_create_app_supplies_manager_instances(monkeypatch):
     assert arguments["logic_manager"] is logic
     assert arguments["data_manager"] is data
     assert flask_app is web_class.return_value.flask_app
+
+@pytest.mark.parametrize(
+    "method, path, status, expected_code",
+    [
+        ("GET", "/admin", "READY_FOR_REVIEW", 302),
+        ("GET", "/reports/OTHER-001", "READY_FOR_REVIEW", 302),
+        ("POST", "/reports/OTHER-001/retry", "AI_FAILED", 302),
+        ("POST", "/reports/OTHER-001/clarify", "NEEDS_CLARIFICATION", 302),
+        ("GET", "/reports/OTHER-001/photos/1", "READY_FOR_REVIEW", 404),
+    ],
+)
+def test_denied_requests_do_not_reach_managers(
+    make_client, method, path, status, expected_code
+):
+    from unittest.mock import Mock
+
+    ai = FakeAI()
+    codes = ["CLARIFY_LOCATION"] if status == "NEEDS_CLARIFICATION" else []
+    data = FakeData([
+        make_report("OWN-001", "READY_FOR_REVIEW"),
+        make_report("OTHER-001", status, codes=codes),
+    ])
+    client = make_client(ai=ai, data=data, admin=False)
+
+    with client.session_transaction() as session:
+        session["my_reports"] = ["OWN-001"]
+
+    data.load_reports = Mock(wraps=data.load_reports)
+    data.save_report = Mock(wraps=data.save_report)
+    data.save_clarifications = Mock(wraps=data.save_clarifications)
+    ai.ensure_ready = Mock(wraps=ai.ensure_ready)
+
+    if method == "POST":
+        response = client.post(path, data={"workplace_location": "Block B"})
+    else:
+        response = client.get(path)
+
+    assert response.status_code == expected_code
+    if expected_code == 302:
+        assert response.headers["Location"].endswith("/admin/login")
+
+    data.load_reports.assert_not_called()
+    data.save_report.assert_not_called()
+    data.save_clarifications.assert_not_called()
+    ai.ensure_ready.assert_not_called()
+    assert ai.calls == []
