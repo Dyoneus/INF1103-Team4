@@ -696,3 +696,57 @@ def test_denied_requests_do_not_reach_managers(
     data.save_clarifications.assert_not_called()
     ai.ensure_ready.assert_not_called()
     assert ai.calls == []
+
+def test_login_logout_and_load_failure_recovery(make_client):
+    data = FakeData([make_report("SESSION-001", "READY_FOR_REVIEW")])
+    client = make_client(data=data, admin=False, csrf=True)
+
+    client.get("/admin/login")
+    with client.session_transaction() as session:
+        token = session["csrf_token"]
+
+    rejected = client.post("/admin/login", data={
+        "username": ADMIN_USERNAME,
+        "password": "wrong-password",
+        "csrf_token": token,
+    })
+    assert rejected.status_code == 401
+    assert client.get("/admin").status_code == 302
+
+    with client.session_transaction() as session:
+        token = session["csrf_token"]
+
+    signed_in = client.post("/admin/login", data={
+        "username": ADMIN_USERNAME,
+        "password": ADMIN_PASSWORD,
+        "csrf_token": token,
+    }, follow_redirects=True)
+    assert signed_in.status_code == 200
+    assert signed_in.request.path == "/admin"
+    assert "SESSION-001" in signed_in.get_data(as_text=True)
+
+    data.load_fails = True
+    unavailable = client.get("/admin")
+    assert unavailable.status_code == 200
+    assert "Saved reports could not be loaded." in unavailable.get_data(as_text=True)
+    assert "SESSION-001" not in unavailable.get_data(as_text=True)
+
+    data.load_fails = False
+    recovered = client.get("/admin")
+    assert recovered.status_code == 200
+    assert "SESSION-001" in recovered.get_data(as_text=True)
+    assert "Saved reports could not be loaded." not in recovered.get_data(as_text=True)
+
+    with client.session_transaction() as session:
+        assert session.get("is_admin") is True
+        token = session["csrf_token"]
+
+    signed_out = client.post(
+        "/admin/logout",
+        data={"csrf_token": token},
+        follow_redirects=True,
+    )
+    assert signed_out.status_code == 200
+    assert signed_out.request.path == "/"
+    assert client.get("/admin").status_code == 302
+    assert client.get("/reports/SESSION-001").status_code == 302
