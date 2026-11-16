@@ -21,11 +21,10 @@ from ai_manager import (
     PhotoLoader,
     PromptBuilder,
     ProviderError,
+    ProviderFactory,
     ReportBatchAnalyzer,
     ResponseValidator,
     RetryableProviderError,
-    create_provider,
-    create_providers,
 )
 
 VALID_FIELDS = {
@@ -35,6 +34,9 @@ VALID_FIELDS = {
     "time_quality": "EXACT",
     "safety_category": "FIRE",
 }
+
+# With a photo attached the model must also say whether the photo matches.
+VALID_FIELDS_WITH_PHOTO = {**VALID_FIELDS, "photo_match": "MATCHED"}
 
 
 class FakeClient:
@@ -133,13 +135,39 @@ def test_validator_accepts_custom_schema():
     }
 
 
-def test_prompt_builder_lists_every_allowed_value_and_the_report():
+def test_prompt_builder_lists_every_text_value_and_the_report():
     prompt = PromptBuilder().build({"description": "wet floor"})
+
+    for field, values in ai_manager.ALLOWED_VALUES.items():
+        for value in values:
+            if field in ai_manager.PHOTO_ONLY_FIELDS:
+                assert f"- {value}" not in prompt  # no photo, so not asked for
+            else:
+                assert f"- {value}" in prompt
+    assert "wet floor" in prompt
+
+
+def test_prompt_builder_adds_photo_values_when_a_photo_is_attached():
+    prompt = PromptBuilder().build({"description": "wet floor"}, photo_count=1)
 
     for values in ai_manager.ALLOWED_VALUES.values():
         for value in values:
             assert f"- {value}" in prompt
-    assert "wet floor" in prompt
+
+
+def test_validator_requires_photo_match_only_when_photos_were_sent():
+    validator = ResponseValidator()
+    without_photo_match = json.dumps(VALID_FIELDS)
+
+    assert validator.validate(without_photo_match) == VALID_FIELDS
+
+    with pytest.raises(ValueError, match="photo_match"):
+        validator.validate(without_photo_match, has_photos=True)
+
+    assert (
+        validator.validate(json.dumps(VALID_FIELDS_WITH_PHOTO), has_photos=True)
+        == VALID_FIELDS_WITH_PHOTO
+    )
 
 
 def test_photo_loader_needs_consent(tmp_path):
@@ -235,7 +263,7 @@ def test_retry_delay_honours_retry_after_but_respects_cap():
 def test_photos_are_passed_to_provider_as_data_urls(tmp_path):
     photo = tmp_path / "p.png"
     photo.write_bytes(b"\x89PNG")
-    provider = FakeProvider(json.dumps(VALID_FIELDS))
+    provider = FakeProvider(json.dumps(VALID_FIELDS_WITH_PHOTO))
 
     AIManager(provider=provider).analyze_incident({}, [str(photo)])
 
@@ -245,26 +273,26 @@ def test_photos_are_passed_to_provider_as_data_urls(tmp_path):
 def test_factory_defaults_to_groq(monkeypatch):
     monkeypatch.delenv("AI_PROVIDER", raising=False)
 
-    assert isinstance(create_provider(), GroqProvider)
+    assert isinstance(ProviderFactory().create(), GroqProvider)
 
 
 def test_factory_picks_openai_from_environment(monkeypatch):
     monkeypatch.setenv("AI_PROVIDER", "openai")
     monkeypatch.setenv("AI_MODEL", "some-model")
 
-    assert isinstance(create_provider(), OpenAIProvider)
+    assert isinstance(ProviderFactory().create(), OpenAIProvider)
 
 
 def test_openai_provider_requires_a_model(monkeypatch):
     monkeypatch.delenv("AI_MODEL", raising=False)
 
     with pytest.raises(RuntimeError, match="AI_MODEL"):
-        create_provider("openai")
+        ProviderFactory().create("openai")
 
 
 def test_factory_rejects_unknown_provider():
     with pytest.raises(RuntimeError, match="Unknown AI provider"):
-        create_provider("nope")
+        ProviderFactory().create("nope")
 
 
 def test_make_result_does_not_need_a_configured_provider(monkeypatch):
@@ -272,7 +300,7 @@ def test_make_result_does_not_need_a_configured_provider(monkeypatch):
     monkeypatch.setenv("AI_PROVIDER", "openai")
     monkeypatch.delenv("AI_MODEL", raising=False)
 
-    result = ai_manager.make_result("r1", error=RuntimeError("CONFIG_MISSING"))
+    result = AIManager().make_result("r1", error=RuntimeError("CONFIG_MISSING"))
 
     assert result["status"] == "error"
 
@@ -326,15 +354,21 @@ def test_gemini_first_and_groq_as_backup_also_works():
     assert AIManager(providers=[gemini, groq]).analyze_incident({}) == VALID_FIELDS
 
 
-def test_first_provider_is_not_retried_when_a_backup_exists():
+def test_first_provider_gets_only_its_fallback_attempts_when_a_backup_exists():
     groq = FakeProvider(
-        RetryableProviderError("busy"), RetryableProviderError("busy"), name="groq"
+        RetryableProviderError("busy"),
+        RetryableProviderError("busy"),
+        RetryableProviderError("busy"),
+        name="groq",
     )
     gemini = FakeProvider(json.dumps(VALID_FIELDS), name="gemini")
+    config = AIConfig(fallback_attempts=2)
 
-    AIManager(providers=[groq, gemini]).analyze_incident({})
+    with patch.object(ai_manager.time, "sleep"):
+        AIManager(providers=[groq, gemini], config=config).analyze_incident({})
 
-    assert groq.calls == 1  # fallback_attempts defaults to 1
+    assert groq.calls == 2  # stopped at fallback_attempts, not max_attempts
+    assert gemini.calls == 1
 
 
 def test_last_provider_still_gets_full_retries():
@@ -355,8 +389,12 @@ def test_last_provider_still_gets_full_retries():
 def test_bad_json_from_first_provider_falls_back_to_second():
     groq = FakeProvider('{"not": "the schema"}', name="groq")
     gemini = FakeProvider(json.dumps(VALID_FIELDS), name="gemini")
+    config = AIConfig(fallback_attempts=1)  # one bad reply is enough to fail over
 
-    assert AIManager(providers=[groq, gemini]).analyze_incident({}) == VALID_FIELDS
+    manager = AIManager(providers=[groq, gemini], config=config)
+
+    assert manager.analyze_incident({}) == VALID_FIELDS
+    assert groq.calls == 1 and gemini.calls == 1
 
 
 def test_error_names_every_provider_when_all_fail():
@@ -404,7 +442,7 @@ def test_ai_provider_list_is_read_from_environment(monkeypatch):
     monkeypatch.setenv("AI_PROVIDER", "groq, gemini")
     monkeypatch.setenv("GEMINI_MODEL", "some-gemini-model")
 
-    providers = create_providers()
+    providers = ProviderFactory().create_all()
 
     assert [type(p) for p in providers] == [GroqProvider, GeminiProvider]
     assert [p.name for p in providers] == ["groq", "gemini"]
@@ -412,13 +450,13 @@ def test_ai_provider_list_is_read_from_environment(monkeypatch):
 
 def test_unknown_name_in_list_is_rejected():
     with pytest.raises(RuntimeError, match="Unknown AI provider 'gemni'"):
-        create_providers("groq,gemni")
+        ProviderFactory().create_all("groq,gemni")
 
 
 def test_unconfigured_provider_does_not_break_the_chain(monkeypatch):
     monkeypatch.delenv("GEMINI_MODEL", raising=False)
     groq_client = FakeClient(json.dumps(VALID_FIELDS))
-    providers = create_providers("gemini,groq")
+    providers = ProviderFactory().create_all("gemini,groq")
     providers[1] = GroqProvider(client=groq_client)  # Groq works, Gemini has no model
 
     result = AIManager(providers=providers).analyze_incident({})
@@ -436,19 +474,40 @@ def test_gemini_provider_points_at_google_endpoint():
     assert provider._api_key_env == "GEMINI_API_KEY"
 
 
-def test_get_client_wrapper_returns_the_failover_manager(monkeypatch):
+def test_factory_builds_a_newly_registered_provider_by_name():
+    class LocalProvider(FakeProvider):
+        @classmethod
+        def from_env(cls, client=None, timeout=None):
+            return cls(json.dumps(VALID_FIELDS), name="local")
+
+    factory = ProviderFactory()
+    factory.register("Local", LocalProvider)
+
+    providers = factory.create_all("local,groq")
+
+    assert isinstance(providers[0], LocalProvider)
+    assert isinstance(providers[1], GroqProvider)
+    assert AIManager(providers=providers).analyze_incident({}) == VALID_FIELDS
+
+
+def test_manager_builds_its_providers_through_the_injected_factory(monkeypatch):
     monkeypatch.delenv("AI_PROVIDER", raising=False)
-    monkeypatch.setenv("GROQ_API_KEY", "test-key")
 
-    client = ai_manager.get_client()
+    class OnlyFake(FakeProvider):
+        @classmethod
+        def from_env(cls, client=None, timeout=None):
+            return cls(json.dumps(VALID_FIELDS))
 
-    assert isinstance(client, AIManager)
+    factory = ProviderFactory(registry={"groq": OnlyFake})
+    manager = AIManager(provider_factory=factory)
+
+    assert manager.analyze_incident({"description": "x"}) == VALID_FIELDS
+    assert isinstance(manager.providers[0], OnlyFake)
 
 
-def test_analyze_incident_wrapper_uses_a_manager_passed_as_client():
-    manager = AIManager(provider=FakeProvider(json.dumps(VALID_FIELDS)))
-
-    assert ai_manager.analyze_incident(manager, {"description": "x"}) == VALID_FIELDS
+def test_batch_entry_point_reports_a_missing_reports_folder(tmp_path, capsys):
+    assert ReportBatchAnalyzer.main(tmp_path) == 2
+    assert "No report JSON files found" in capsys.readouterr().out
 
 
 # --- Photos are mentioned in the prompt only when they are really attached ---
@@ -472,7 +531,7 @@ def test_prompt_with_photos_tells_the_model_how_to_use_them():
 def test_manager_mentions_photos_only_when_they_were_encoded(tmp_path):
     photo = tmp_path / "p.png"
     photo.write_bytes(b"\x89PNG")
-    with_photo = FakeProvider(json.dumps(VALID_FIELDS))
+    with_photo = FakeProvider(json.dumps(VALID_FIELDS_WITH_PHOTO))
     broken_photo = FakeProvider(json.dumps(VALID_FIELDS))
     no_photo = FakeProvider(json.dumps(VALID_FIELDS))
 
