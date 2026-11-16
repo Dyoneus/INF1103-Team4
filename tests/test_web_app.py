@@ -150,25 +150,58 @@ def make_client(tmp_path):
 
 def test_dashboard_lists_reports_with_status_and_location_ranking(make_client):
     data = FakeData([
-        make_report("R-1", "READY_FOR_REVIEW"),
-        make_report("R-2", "AI_FAILED"),
+        make_report(
+            "R-1", "READY_FOR_REVIEW",
+            workplace_location="  Hougang   Avenue  1  ",
+        ),
+        make_report(
+            "R-2", "AI_FAILED",
+            workplace_location="hougang avenue 1",
+        ),
         make_report("R-3", workplace_location="Jurong"),
+        make_report("R-4", "READY_FOR_REVIEW", workplace_location="Ang Mo Kio"),
     ])
 
-    page = make_client(data=data).get("/admin").get_data(as_text=True)
+    response = make_client(data=data).get("/admin")
+    page = response.get_data(as_text=True)
 
-    assert all(reference in page for reference in ("R-1", "R-2", "R-3"))
-    assert "Ready for review" in page and "Assessment failed" in page and "Not assessed" in page
-    # The Logic Manager's location summary: Hougang has two reports, Jurong one.
-    assert page.index("<span>Hougang</span><b>2</b>") < page.index("<span>Jurong</span><b>1</b>")
+    assert response.status_code == 200
+    assert all(reference in page for reference in ("R-1", "R-2", "R-3", "R-4"))
+    assert "Ready for review" in page
+    assert "Assessment failed" in page
+    assert "Not assessed" in page
+
+    ranking = page.split('<ol class="ranking">', 1)[1].split("</ol>", 1)[0]
+    hougang = "<span>Hougang Avenue 1</span><b>2</b>"
+    ang_mo_kio = "<span>Ang Mo Kio</span><b>1</b>"
+    jurong = "<span>Jurong</span><b>1</b>"
+
+    # Case and spacing differences must produce one location group.
+    assert ranking.count("<li>") == 3
+    # Highest report count first; alphabetical order breaks a tie.
+    assert ranking.index(hougang) < ranking.index(ang_mo_kio) < ranking.index(jurong)
 
 
 def test_dashboard_filters_by_status(make_client):
-    data = FakeData([make_report("R-1", "READY_FOR_REVIEW"), make_report("R-2", "AI_FAILED")])
+    data = FakeData([
+        make_report("R-1", "READY_FOR_REVIEW"),
+        make_report("R-2", "AI_FAILED"),
+        make_report("R-3", "AI_FAILED", workplace_location="Jurong"),
+    ])
 
-    page = make_client(data=data).get("/admin?status=AI_FAILED").get_data(as_text=True)
+    response = make_client(data=data).get("/admin?status=AI_FAILED")
+    page = response.get_data(as_text=True)
 
-    assert "R-2" in page and "R-1" not in page
+    assert response.status_code == 200
+    assert "R-2" in page and "R-3" in page
+    assert "R-1" not in page
+
+    # The status filter changes the table; the summaries cover all reports.
+    assert ">All <b>3</b>" in page
+    assert ">Ready for review <b>1</b>" in page
+    assert ">Assessment failed <b>2</b>" in page
+    assert "<span>Hougang</span><b>2</b>" in page
+    assert "<span>Jurong</span><b>1</b>" in page
 
 
 def test_dashboard_reports_a_load_failure_without_crashing(make_client):
