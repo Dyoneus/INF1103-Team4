@@ -1,6 +1,4 @@
 import json
-import os
-import tempfile
 from pathlib import Path
 from report_store import ReportStorage
 from database_manager import DatabaseManager
@@ -9,28 +7,47 @@ import logging
 REPORTS_DIR = Path("reports")
 
 class DataManager:
-    def __init__(self, database=None):
+    def __init__(self, database=None, storage=None):
         if database is None:
             database = DatabaseManager()
 
-        self.database = database
-        self.storage = ReportStorage()
-        self.database_ready = self.database.initialize_database()
+        if storage is None:
+            storage = ReportStorage(REPORTS_DIR)
+
+        self._database = database
+        self._storage = storage
+        self._database_ready = self.database.initialize_database()
 
         # Import legacy JSON reports once at startup
-        self.legacy_import_ok = self.migrate_reports()
+        self._legacy_import_ok = self.migrate_reports()
 
         if self.database_ready and not self.legacy_import_ok:
             logging.warning("Some legacy JSON reports could not be imported.")
+
+    @property
+    def database(self):
+        return self._database
+
+    @property
+    def storage(self):
+        return self._storage
+
+    @property
+    def database_ready(self):
+        return self._database_ready
+
+    @property
+    def legacy_import_ok(self):
+        return self._legacy_import_ok
 
     def migrate_reports(self):
         if not self.database_ready:
             return False
 
-        if not REPORTS_DIR.exists():
+        if not self.storage.reports_dir.exists():
             return True
 
-        if not REPORTS_DIR.is_dir():
+        if not self.storage.reports_dir.is_dir():
             return False
 
         existing_reports = self.database.load_reports()
@@ -44,9 +61,8 @@ class DataManager:
         }
 
         try:
-            for report_path in sorted(REPORTS_DIR.glob("*.json")):
-                with report_path.open("r", encoding="utf-8") as file:
-                    report = json.load(file)
+            for report_path in sorted(self.storage.reports_dir.glob("*.json")):
+                report = self.storage.read_report(report_path)
 
                 if not isinstance(report, dict):
                     return False
@@ -111,8 +127,10 @@ class DataManager:
             if not report_path:
                 raise OSError("No report path was returned.")
 
-            with Path(report_path).open("r", encoding="utf-8") as file:
-                saved_report = json.load(file)
+            saved_report = self.storage.read_report(report_path)
+
+            if not isinstance(saved_report, dict):
+                raise OSError("Could not read the saved JSON report.")
 
             if not self.database.create_report(saved_report):
                 # Preserve JSON and photos for recovery.
@@ -157,14 +175,13 @@ class DataManager:
                 for value in case_changes.values()):
                 return False
         
-        report_path = REPORTS_DIR / (reference_id + ".json")
+        report_path = self.storage.reports_dir / (reference_id + ".json")
 
         try:
             if not report_path.is_file():
                 return False
 
-            with report_path.open("r", encoding="utf-8") as file:
-                report = json.load(file)
+            report = self.storage.read_report(report_path)
 
             if not isinstance(report, dict):
                 return False
@@ -207,7 +224,7 @@ class DataManager:
             if not self.database.update_report(reference_id, report):
                 return False
 
-            if not self._write_report(report_path, report):
+            if not self.storage.write_report(report_path, report):
                 # print("Failed to update report in JSON.")
 
                 # Restore the previous SQLite report.
@@ -220,36 +237,6 @@ class DataManager:
 
         except (OSError, json.JSONDecodeError, UnicodeError):
             return False
-
-    def _write_report(self, report_path, report):
-        temp_file = None
-
-        try:
-            json_data = json.dumps(report, indent=4, ensure_ascii=False)
-
-            with tempfile.NamedTemporaryFile(
-                mode="w",
-                encoding="utf-8",
-                dir=REPORTS_DIR,
-                suffix=".tmp",
-                delete=False
-            ) as file:
-                temp_file = file.name
-                file.write(json_data)
-
-            os.replace(temp_file, report_path)
-            return True
-
-        except (OSError, TypeError, ValueError):
-            return False
-
-        finally:
-            if temp_file is not None:
-                try:
-                    os.remove(temp_file)
-                except OSError:
-                    pass
-
 
     def save_report(self, reference_id, ai_result, assessment):
         if not isinstance(ai_result, dict):

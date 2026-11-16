@@ -13,6 +13,7 @@ import io_manager
 import main
 
 from database_manager import DatabaseManager
+import report_store
 
 FIELDS = {
     "issue_clarity": "CLEAR", "location_quality": "ADEQUATE",
@@ -176,12 +177,12 @@ def test_failed_correction_save_keeps_original_and_skips_ai(tmp_path, monkeypatc
     def unexpected_ai(self):
         pytest.fail("AI must not run before corrections are saved")
 
-    monkeypatch.setattr(data_manager.os, "replace", cannot_replace)
+    monkeypatch.setattr(report_store.os, "replace", cannot_replace)
     monkeypatch.setattr(ai_manager.AIManager, "ensure_ready", unexpected_ai)
     application.clarify_report()
     assert path.read_bytes() == before
     assert not list(tmp_path.glob("*.tmp"))
-
+    assert isolated_database.load_reports()[0]["case_details"]["workplace_location"] == "Warehouse"
 
 def test_clarification_validates_and_collects_datetime_once(monkeypatch):
     report = {"case_details": {}, "assessment": {"clarification_codes": ["ADD_DATE", "ADD_TIME"]}}
@@ -274,13 +275,28 @@ def test_legacy_json_is_imported_once_at_startup(tmp_path, monkeypatch, isolated
 
 
 def test_unavailable_database_reports_load_failure(isolated_database):
-    isolated_database.database_ready = False
+    isolated_database._database_ready = False
 
     assert isolated_database.load_reports() is None
 
 
 def test_unavailable_database_raises_on_create(isolated_database):
-    isolated_database.database_ready = False
+    isolated_database._database_ready = False
 
     with pytest.raises(OSError):
         isolated_database.create_report({})
+
+def test_data_manager_storage_dependency_injection(tmp_path, monkeypatch):
+    database = DatabaseManager(tmp_path / "test.db")
+    storage = report_store.ReportStorage(tmp_path)
+
+    monkeypatch.setattr(data_manager, "REPORTS_DIR", tmp_path)
+
+    manager = data_manager.DataManager(
+        database=database,
+        storage=storage
+    )
+
+    assert manager.database is database
+    assert manager.storage is storage
+    assert manager.database_ready is True

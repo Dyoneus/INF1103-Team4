@@ -1,19 +1,25 @@
 """JSON storage for SafeReport"""
 
 import json
+import os
 import shutil
+import tempfile
 import uuid
 from datetime import datetime
 from pathlib import Path
+from storage_interface import StorageInterface
 
 REPORTS_DIR = Path("reports")
 
-
-class ReportStorage:
+class ReportStorage(StorageInterface):
     def __init__(self, reports_dir=None):
         if reports_dir is None:
             reports_dir = REPORTS_DIR
-        self.reports_dir = Path(reports_dir)
+        self._reports_dir = Path(reports_dir)
+
+    @property
+    def reports_dir(self):
+        return self._reports_dir
 
     def save_report(self, report: dict) -> Path:
         now = datetime.now()
@@ -54,4 +60,42 @@ class ReportStorage:
             saved.append(destination.as_posix())
 
         return saved
+
+    def read_report(self, report_path):
+        try:
+            with Path(report_path).open("r", encoding="utf-8") as file:
+                return json.load(file)
+
+        except (OSError, json.JSONDecodeError, UnicodeError):
+            return None
+
+    def write_report(self, report_path, report):
+        temp_file = None
+
+        try:
+            report_path = Path(report_path)
+            json_data = json.dumps(report, indent=4, ensure_ascii=False)
+
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=report_path.parent,
+                suffix=".tmp",
+                delete=False
+            ) as file:
+                temp_file = file.name
+                file.write(json_data)
+
+            os.replace(temp_file, report_path)
+            return True
+
+        except (OSError, TypeError, ValueError):
+            return False
+
+        finally:
+            if temp_file is not None:
+                try:
+                    os.remove(temp_file)
+                except OSError:
+                    pass
 

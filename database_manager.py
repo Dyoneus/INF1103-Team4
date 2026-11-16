@@ -59,11 +59,21 @@ class DatabaseManager:
             reports = []
 
             for row in rows:
-                report = json.loads(row[0])
-                reports.append(report)
+                try:
+                    report = json.loads(row[0])
+
+                    if not isinstance(report, dict):
+                        logging.warning("Skipping invalid database record.")
+                        continue
+
+                    reports.append(report)
+
+                except (json.JSONDecodeError, TypeError):
+                    logging.warning("Skipping corrupted database record.")
+                    continue
 
             return reports
-        
+
         except(sqlite3.Error, json.JSONDecodeError, TypeError) as error:
             logging.error("Failed to load reports: %s", error)
             return None
