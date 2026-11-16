@@ -110,4 +110,16 @@
     </section>
   </aside>
 </div>
+
+{% if is_admin %}
+<section class="panel danger">
+  <h2>Delete this report</h2>
+  <p>This permanently removes the report, its assessment and its photos. It cannot be undone.</p>
+  <form method="post" action="{{ url_for('delete_report', reference_id=report.reference_id) }}"
+        data-confirm="Permanently delete report {{ report.reference_id }} and its photos?">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="button button-danger" type="submit">Delete report</button>
+  </form>
+</section>
+{% endif %}
 {% endblock %}

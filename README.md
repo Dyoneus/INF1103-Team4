@@ -45,6 +45,7 @@ Reports are stored in a SQLite database at `data/safereport.db` (change the loca
 - **1. Create a new safety report** saves the report and assesses its readiness.
 - **2. Retry a failed assessment** lists failed reports. Select a number or reference ID to retry and update that same report.
 - **3. Clarify and reassess a saved report** lists incomplete reports and reports needing clarification. Answer the requested questions to update and reassess the same record.
+- **4. Delete a saved report** lists every saved report. Select one and confirm with `y` to permanently remove it from the database, together with its JSON copy and photos.
 - **0. Exit** closes the application. In report selection, 0 cancels instead.
 
 Clarification answers are saved together before reassessment. Ctrl+C during the questions cancels without saving changes. If AI then fails, the corrections remain saved and option 2 can retry them. Reference IDs, reporter details and attached photos are preserved.
@@ -137,12 +138,13 @@ docker compose up --build web
 | Report page (`/reports/<id>`) | Admins, and the person who submitted it | Shows the report and its assessment. **Retry assessment** reruns a failed assessment; **Save and reassess** asks only for the details the assessment flagged | Menu options 2 and 3 |
 | Admin sign in (`/admin/login`) | Everyone | Signs the admin in with `SAFEREPORT_ADMIN_USERNAME` and `SAFEREPORT_ADMIN_PASSWORD` | - |
 | All reports (`/admin`) | Admins | Lists saved reports, filters them by status, and ranks locations by report count | - |
+| Delete report (button on the report page) | Admins | Permanently deletes the report, its assessment and its photos after a confirmation prompt | Menu option 4 |
 
 A member of the public can reopen only the reports they submitted from the same browser (remembered in their session cookie), so they can answer clarification questions without seeing anyone else's report. If either `SAFEREPORT_ADMIN_USERNAME` or `SAFEREPORT_ADMIN_PASSWORD` is not set, nobody can sign in as an admin. The username is case-sensitive. Do not commit the password; keep it in `.env` or your shell.
 
 ### How it fits the design
 
-- `SafeReportWebApp` owns the Flask app and routes. It is given the AI, Logic and Data managers, so tests pass in fakes.
+- `SafeReportWebApp` owns the Flask app and routes. It is given the AI, Logic and Data managers, so tests pass in fakes. `SafeReportWebApp.main()` is the entry point that `python web_app.py` runs, just as `SafeReportApplication.main()` is for `python main.py`.
 - `AccessControl` decides who may see what: admin sign-in, sign-out, and which reports a visitor submitted.
 - `WebReportForm` checks browser input with the same `Validator` subclasses as the terminal form.
 - `WebNotifier` stands in for the terminal `IOManager`, so `SafeReportApplication.assess_report()` runs unchanged and its messages appear on the page.

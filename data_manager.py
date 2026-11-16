@@ -263,3 +263,45 @@ class DataManager:
         """Save corrected details and invalidate the old assessment."""
         return self.update_report(reference_id, {}, case_changes=changes)
 
+    def delete_report(self, reference_id):
+        """Delete a report from SQLite, then its JSON copy and photos."""
+        if not isinstance(reference_id, str) or not reference_id.strip():
+            return False
+
+        if "/" in reference_id or "\\" in reference_id:
+            return False
+
+        if reference_id in (".", ".."):
+            return False
+
+        if not self.database_ready:
+            return False
+
+        existing_reports = self.database.load_reports()
+
+        if existing_reports is None:
+            return False
+
+        original_report = None
+
+        for existing_report in existing_reports:
+            if existing_report.get("reference_id") == reference_id:
+                original_report = existing_report
+                break
+
+        if original_report is None:
+            return False
+
+        if not self.database.delete_report(reference_id):
+            return False
+
+        # The JSON copy must go too: a leftover file would be imported
+        # again by migrate_reports() the next time the application starts.
+        if not self.storage.delete_report(reference_id):
+            # Restore the SQLite row so both stores stay consistent.
+            if not self.database.create_report(original_report):
+                logging.error("SQLite rollback failed.")
+
+            return False
+
+        return True

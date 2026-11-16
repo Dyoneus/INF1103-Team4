@@ -644,18 +644,20 @@ def menu_setup(assessment_setup):
     application.process_new_report = Mock()
     application.retry_failed_report = Mock()
     application.clarify_report = Mock()
+    application.delete_report = Mock()
 
     return application, io, data
 
 
 def test_menu_dispatches_workflows_on_the_same_application(menu_setup):
     application, io, data = menu_setup
-    io.get_menu_choice.side_effect = ["1", "2", "3", "0"]
+    io.get_menu_choice.side_effect = ["1", "2", "3", "4", "0"]
 
     workflows = Mock()
     workflows.attach_mock(application.process_new_report, "create")
     workflows.attach_mock(application.retry_failed_report, "retry")
     workflows.attach_mock(application.clarify_report, "clarify")
+    workflows.attach_mock(application.delete_report, "delete")
 
     application.run()
 
@@ -663,10 +665,11 @@ def test_menu_dispatches_workflows_on_the_same_application(menu_setup):
         call.create(),
         call.retry(),
         call.clarify(),
+        call.delete(),
     ]
     data.load_reports.assert_called_once_with()
-    assert io.display_menu.call_count == 4
-    assert io.get_menu_choice.call_count == 4
+    assert io.display_menu.call_count == 5
+    assert io.get_menu_choice.call_count == 5
     io.display_processing_error.assert_not_called()
 
 
@@ -686,6 +689,7 @@ def test_menu_exit_does_not_start_a_workflow(menu_setup, reports):
     application.process_new_report.assert_not_called()
     application.retry_failed_report.assert_not_called()
     application.clarify_report.assert_not_called()
+    application.delete_report.assert_not_called()
     io.display_processing_error.assert_not_called()
 
 
@@ -704,7 +708,7 @@ def test_menu_load_failure_stops_before_showing_menu(menu_setup):
     application.clarify_report.assert_not_called()
 
 
-def test_run_constructs_managers_and_starts_application(monkeypatch):
+def test_main_constructs_managers_and_starts_application(monkeypatch):
     io = Mock(spec=main.io_manager.IOManager)
     ai = Mock(spec=main.ai_manager.AIManager)
     logic = Mock(spec=main.logic_manager.LogicManager)
@@ -714,28 +718,101 @@ def test_run_constructs_managers_and_starts_application(monkeypatch):
     ai_class = Mock(return_value=ai)
     logic_class = Mock(return_value=logic)
     data_class = Mock(return_value=data)
-    application_class = Mock()
+    started = []
+
+    def fake_run(self):
+        started.append(self)
+        return "finished"
 
     monkeypatch.setattr(main.io_manager, "IOManager", io_class)
     monkeypatch.setattr(main.ai_manager, "AIManager", ai_class)
     monkeypatch.setattr(main.logic_manager, "LogicManager", logic_class)
     monkeypatch.setattr(main.data_manager, "DataManager", data_class)
-    monkeypatch.setattr(main, "SafeReportApplication", application_class)
+    monkeypatch.setattr(main.SafeReportApplication, "run", fake_run)
 
-    result = main.run()
+    result = main.SafeReportApplication.main()
 
     io_class.assert_called_once_with()
     ai_class.assert_called_once_with()
     logic_class.assert_called_once_with()
     data_class.assert_called_once_with()
-    application_class.assert_called_once_with(
-        io_manager=io,
-        ai_manager=ai,
-        logic_manager=logic,
-        data_manager=data,
-    )
-    application_class.return_value.run.assert_called_once_with()
-    assert result is application_class.return_value.run.return_value
+
+    assert result == "finished"
+    assert len(started) == 1
+    application = started[0]
+    assert isinstance(application, main.SafeReportApplication)
+    assert application._io is io
+    assert application._ai is ai
+    assert application._logic is logic
+    assert application._data is data
+
+
+@pytest.fixture
+def delete_setup(assessment_setup):
+    application, io, ai, logic, data, report = assessment_setup
+    saved = {"reference_id": "SAVED-001"}
+
+    data.load_reports.return_value = [saved]
+    data.delete_report.return_value = True
+    io.select_saved_report.return_value = saved
+    io.confirm_report_deletion.return_value = True
+
+    return application, io, ai, data, saved
+
+
+def test_delete_confirmed_removes_report_and_informs_user(delete_setup):
+    application, io, ai, data, saved = delete_setup
+
+    application.delete_report()
+
+    io.select_saved_report.assert_called_once_with([saved])
+    io.confirm_report_deletion.assert_called_once_with("SAVED-001")
+    data.delete_report.assert_called_once_with("SAVED-001")
+    io.display_report_deleted.assert_called_once_with("SAVED-001")
+    io.display_processing_error.assert_not_called()
+    ai.analyze_incident.assert_not_called()
+
+
+def test_delete_not_confirmed_keeps_report(delete_setup):
+    application, io, ai, data, saved = delete_setup
+    io.confirm_report_deletion.return_value = False
+
+    application.delete_report()
+
+    data.delete_report.assert_not_called()
+    io.display_report_deleted.assert_not_called()
+    io.display_processing_error.assert_not_called()
+
+
+def test_delete_without_selection_asks_nothing_further(delete_setup):
+    application, io, ai, data, saved = delete_setup
+    io.select_saved_report.return_value = None
+
+    application.delete_report()
+
+    io.confirm_report_deletion.assert_not_called()
+    data.delete_report.assert_not_called()
+
+
+def test_delete_load_failure_stops_selection(delete_setup):
+    application, io, ai, data, saved = delete_setup
+    data.load_reports.return_value = None
+
+    application.delete_report()
+
+    io.display_processing_error.assert_called_once_with("LOAD_FAILED")
+    io.select_saved_report.assert_not_called()
+    data.delete_report.assert_not_called()
+
+
+def test_delete_failure_is_reported(delete_setup):
+    application, io, ai, data, saved = delete_setup
+    data.delete_report.return_value = False
+
+    application.delete_report()
+
+    io.display_processing_error.assert_called_once_with("DELETE_FAILED")
+    io.display_report_deleted.assert_not_called()
 
 def test_assessment_works_with_real_ai_manager(assessment_setup):
     application, io, ai, logic, data, report = assessment_setup

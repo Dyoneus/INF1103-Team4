@@ -79,6 +79,7 @@ class FakeData:
         self.reports = {report["reference_id"]: report for report in reports}
         self.load_fails = False
         self.create_fails = False
+        self.delete_fails = False
 
     def load_reports(self):
         return None if self.load_fails else list(self.reports.values())
@@ -100,6 +101,12 @@ class FakeData:
 
     def save_clarifications(self, reference_id, changes):
         self.reports[reference_id]["case_details"].update(changes)
+        return True
+
+    def delete_report(self, reference_id):
+        if self.delete_fails or reference_id not in self.reports:
+            return False
+        del self.reports[reference_id]
         return True
 
 
@@ -692,12 +699,11 @@ def test_uploads_are_removed_even_if_the_request_fails():
 
     assert not Path(paths[0]).exists()
 
-def test_create_app_supplies_manager_instances(monkeypatch):
+def test_from_environment_supplies_manager_instances(monkeypatch):
     from unittest.mock import Mock
     import ai_manager
     import data_manager
     import logic_manager
-    import web_app
 
     ai = Mock(spec=ai_manager.AIManager)
     logic = Mock(spec=logic_manager.LogicManager)
@@ -706,25 +712,96 @@ def test_create_app_supplies_manager_instances(monkeypatch):
     ai_class = Mock(return_value=ai)
     logic_class = Mock(return_value=logic)
     data_class = Mock(return_value=data)
-    web_class = Mock()
 
     monkeypatch.setattr(ai_manager, "AIManager", ai_class)
     monkeypatch.setattr(logic_manager, "LogicManager", logic_class)
     monkeypatch.setattr(data_manager, "DataManager", data_class)
-    monkeypatch.setattr(web_app, "SafeReportWebApp", web_class)
+    monkeypatch.setenv("SAFEREPORT_ADMIN_USERNAME", ADMIN_USERNAME)
+    monkeypatch.setenv("SAFEREPORT_ADMIN_PASSWORD", ADMIN_PASSWORD)
 
-    flask_app = web_app.create_app()
+    web = SafeReportWebApp.from_environment()
 
     ai_class.assert_called_once_with()
     logic_class.assert_called_once_with()
     data_class.assert_called_once_with()
-    web_class.assert_called_once()
 
-    arguments = web_class.call_args.kwargs
-    assert arguments["ai_manager"] is ai
-    assert arguments["logic_manager"] is logic
-    assert arguments["data_manager"] is data
-    assert flask_app is web_class.return_value.flask_app
+    assert isinstance(web, SafeReportWebApp)
+    assert web._ai is ai
+    assert web._logic is logic
+    assert web._data is data
+    assert web._access.admin_enabled
+
+
+def test_main_serves_the_app_on_the_configured_host_and_port(monkeypatch):
+    served = []
+    web = SafeReportWebApp(FakeAI(), LogicManager(), FakeData())
+
+    monkeypatch.setattr(SafeReportWebApp, "from_environment", classmethod(lambda cls: web))
+    monkeypatch.setattr(
+        SafeReportWebApp, "run",
+        lambda self, host, port, debug=False: served.append((self, host, port)),
+    )
+    monkeypatch.setenv("SAFEREPORT_HOST", "0.0.0.0")
+    monkeypatch.setenv("SAFEREPORT_PORT", "8080")
+
+    SafeReportWebApp.main()
+
+    assert served == [(web, "0.0.0.0", 8080)]
+
+
+# Deleting a report (admins only)
+
+def test_admin_can_delete_a_report(make_client):
+    data = FakeData([make_report("R-1", "READY_FOR_REVIEW"), make_report("R-2", "AI_FAILED")])
+    client = make_client(data=data)
+
+    page = client.get("/reports/R-1").get_data(as_text=True)
+    assert "/reports/R-1/delete" in page
+
+    response = client.post("/reports/R-1/delete", follow_redirects=True)
+
+    assert response.request.path == "/admin"
+    assert "Report R-1 and its photos were deleted." in response.get_data(as_text=True)
+    assert list(data.reports) == ["R-2"]
+    assert client.get("/reports/R-1").status_code == 404
+
+
+def test_delete_failure_keeps_the_report_and_says_so(make_client):
+    data = FakeData([make_report("R-1", "READY_FOR_REVIEW")])
+    data.delete_fails = True
+
+    response = make_client(data=data).post("/reports/R-1/delete", follow_redirects=True)
+
+    assert response.request.path == "/reports/R-1"
+    assert "The report could not be deleted." in response.get_data(as_text=True)
+    assert list(data.reports) == ["R-1"]
+
+
+def test_deleting_an_unknown_report_is_not_found(make_client):
+    assert make_client().post("/reports/MISSING/delete").status_code == 404
+
+
+def test_submitter_cannot_delete_or_see_the_delete_button(make_client):
+    data = FakeData([make_report("OWN-001", "READY_FOR_REVIEW")])
+    client = make_client(data=data, admin=False)
+    with client.session_transaction() as session:
+        session["my_reports"] = ["OWN-001"]
+
+    page = client.get("/reports/OWN-001").get_data(as_text=True)
+    response = client.post("/reports/OWN-001/delete")
+
+    assert "/reports/OWN-001/delete" not in page
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/admin/login")
+    assert list(data.reports) == ["OWN-001"]
+
+
+def test_delete_requires_the_csrf_token(make_client):
+    data = FakeData([make_report("R-1", "READY_FOR_REVIEW")])
+    client = make_client(data=data, csrf=True)
+
+    assert client.post("/reports/R-1/delete").status_code == 400
+    assert list(data.reports) == ["R-1"]
 
 @pytest.mark.parametrize(
     "method, path, status, expected_code",
@@ -733,6 +810,7 @@ def test_create_app_supplies_manager_instances(monkeypatch):
         ("GET", "/reports/OTHER-001", "READY_FOR_REVIEW", 302),
         ("POST", "/reports/OTHER-001/retry", "AI_FAILED", 302),
         ("POST", "/reports/OTHER-001/clarify", "NEEDS_CLARIFICATION", 302),
+        ("POST", "/reports/OTHER-001/delete", "READY_FOR_REVIEW", 302),
         ("GET", "/reports/OTHER-001/photos/1", "READY_FOR_REVIEW", 404),
     ],
 )
@@ -755,6 +833,7 @@ def test_denied_requests_do_not_reach_managers(
     data.load_reports = Mock(wraps=data.load_reports)
     data.save_report = Mock(wraps=data.save_report)
     data.save_clarifications = Mock(wraps=data.save_clarifications)
+    data.delete_report = Mock(wraps=data.delete_report)
     ai.ensure_ready = Mock(wraps=ai.ensure_ready)
 
     if method == "POST":
@@ -769,6 +848,7 @@ def test_denied_requests_do_not_reach_managers(
     data.load_reports.assert_not_called()
     data.save_report.assert_not_called()
     data.save_clarifications.assert_not_called()
+    data.delete_report.assert_not_called()
     ai.ensure_ready.assert_not_called()
     assert ai.calls == []
 
