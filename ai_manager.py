@@ -10,20 +10,24 @@ Classes
 AIProvider                  interface every vendor adapter implements
 ChatCompletionsProvider     shared code for SDKs with chat.completions.create
 GroqProvider                Groq adapter (default)
+GeminiProvider              Google Gemini via its OpenAI-compatible endpoint
 OpenAIProvider              OpenAI adapter; base_url also covers compatible vendors
 AIConfig                    retry/timeout settings
 ResponseValidator           checks the model's JSON against the allowed schema
 PromptBuilder               builds the instruction text sent to the model
 PhotoLoader                 finds consented photos and encodes them for the model
-AIManager                   main entry point: analyze_incident / make_result
+AIManager                   main entry point: tries each provider in order (failover)
 ReportBatchAnalyzer         standalone batch mode: reports/*.json -> ai_output.json
 
-Choosing a provider without code changes (environment variables):
-    AI_PROVIDER      groq (default) | openai
-    AI_MODEL         model name (required for openai, optional for groq)
-    AI_BASE_URL      optional, openai only: point at an OpenAI-compatible vendor
-    AI_API_KEY_ENV   optional, openai only: name of the key variable
-                     (default OPENAI_API_KEY)
+Choosing providers without code changes (environment variables):
+    AI_PROVIDER      one name or an ordered list, e.g. "groq,gemini": the first
+                     is tried first, the next ones only if it fails
+                     (names: groq | gemini | openai; default groq)
+    GROQ_API_KEY     + optional GROQ_MODEL
+    GEMINI_API_KEY   + GEMINI_MODEL (required)
+    openai (generic or any OpenAI-compatible vendor):
+        AI_MODEL (required), OPENAI_API_KEY, optional AI_BASE_URL and
+        AI_API_KEY_ENV (name of the key variable)
 
 The module-level functions at the bottom are transitional wrappers so that
 main.py and the existing tests, which call ai_manager.<function>(...), keep
@@ -47,6 +51,13 @@ from groq import Groq
 
 import io_manager
 
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:
+    pass
+
 logger = logging.getLogger(__name__)
 
 EXTRACTED_FIELDS = [
@@ -55,7 +66,10 @@ EXTRACTED_FIELDS = [
     "date_quality",
     "time_quality",
     "safety_category",
+    "photo_match",
 ]
+
+PHOTO_ONLY_FIELDS = {"photo_match"}
 
 ALLOWED_VALUES = {
     "issue_clarity": ["CLEAR", "UNCLEAR"],
@@ -73,6 +87,7 @@ ALLOWED_VALUES = {
         "OTHER",
         "UNCLEAR",
     ],
+    "photo_match": ["MATCHED", "UNMATCHED"],
 }
 
 
@@ -80,9 +95,10 @@ ALLOWED_VALUES = {
 class AIConfig:
     """Vendor-neutral settings (frozen = cannot change by accident)."""
 
-    max_attempts: int = 3        # total tries per report (first try + retries)
-    request_timeout: int = 30    # seconds per API call
-    max_backoff: int = 30        # cap on any single wait between attempts
+    max_attempts: int = 3         # tries for the LAST provider (first try + retries)
+    fallback_attempts: int = 2    # tries for a provider that has another one behind it
+    request_timeout: int = 90     # seconds per API call (vision + Gemini need >30s)
+    max_backoff: int = 30         # cap on any single wait between attempts
 
 
 # Old constant names, so other modules and tests that read them still work.
@@ -110,6 +126,8 @@ class RetryableProviderError(Exception):
 
 class AIProvider(ABC):
     """What AIManager needs from any AI vendor."""
+
+    name = "provider"  # shown in logs and error messages
 
     @abstractmethod
     def complete_json(self, prompt, image_urls=()):
@@ -164,13 +182,22 @@ class ChatCompletionsProvider(AIProvider):
             for url in image_urls
         ]
 
+        request_kwargs = {
+            "model": self._model,
+            "messages": [{"role": "user", "content": content}],
+            "temperature": 0,
+            "response_format": {"type": "json_object"},
+        }
+
         try:
-            response = client.chat.completions.create(
-                model=self._model,
-                messages=[{"role": "user", "content": content}],
-                temperature=0,
-                response_format={"type": "json_object"},
-            )
+            try:
+                response = client.chat.completions.create(**request_kwargs)
+            except sdk.APIStatusError as exc:
+                if exc.status_code == 400 and "response_format" in str(exc).lower():
+                    request_kwargs.pop("response_format")
+                    response = client.chat.completions.create(**request_kwargs)
+                else:
+                    raise
         except (
             sdk.APIConnectionError,   # includes timeouts
             sdk.RateLimitError,
@@ -180,8 +207,9 @@ class ChatCompletionsProvider(AIProvider):
                 str(exc), retry_after=self._retry_after(exc)
             ) from exc
         except sdk.APIStatusError as exc:
+            detail = getattr(getattr(exc, "response", None), "text", "")
             raise ProviderError(
-                f"Non-retryable API error (HTTP {exc.status_code}): {exc}"
+                f"Non-retryable API error (HTTP {exc.status_code}): {exc} {detail}".strip()
             ) from exc
 
         if not response.choices:
@@ -201,6 +229,7 @@ class ChatCompletionsProvider(AIProvider):
 
 
 class GroqProvider(ChatCompletionsProvider):
+    name = "groq"
     DEFAULT_MODEL = "qwen/qwen3.8-27b"
     API_KEY_ENV = "GROQ_API_KEY"
 
@@ -209,8 +238,11 @@ class GroqProvider(ChatCompletionsProvider):
 
     @classmethod
     def from_env(cls, client=None, timeout=REQUEST_TIMEOUT):
-        return cls(model=os.environ.get("AI_MODEL") or None,
-                   client=client, timeout=timeout)
+        return cls(
+            model=os.environ.get("GROQ_MODEL") or None,
+            client=client,
+            timeout=timeout,
+        )
 
     def _sdk(self):
         return groq
@@ -233,6 +265,8 @@ class OpenAIProvider(ChatCompletionsProvider):
     The model has no default on purpose: model names differ per vendor and
     change often, so the caller must choose one.
     """
+
+    name = "openai"
 
     def __init__(
         self,
@@ -291,19 +325,99 @@ class OpenAIProvider(ChatCompletionsProvider):
         )
 
 
-PROVIDERS = {"groq": GroqProvider, "openai": OpenAIProvider}
+class GeminiProvider(OpenAIProvider):
+    """Google Gemini through its OpenAI-compatible endpoint (needs `openai`)."""
+
+    name = "gemini"
+    BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    API_KEY_ENV = "GEMINI_API_KEY"
+
+    def __init__(self, model, client=None, timeout=REQUEST_TIMEOUT):
+        super().__init__(
+            model,
+            client,
+            timeout,
+            base_url=self.BASE_URL,
+            api_key_env=self.API_KEY_ENV,
+        )
+
+    @classmethod
+    def from_env(cls, client=None, timeout=REQUEST_TIMEOUT):
+        model = os.environ.get("GEMINI_MODEL")
+
+        if not model:
+            raise RuntimeError(
+                "GEMINI_MODEL is not configured. Set it to a Gemini model "
+                "name (see Google AI Studio) before running the program."
+            )
+
+        return cls(model=model, client=client, timeout=timeout)
+
+
+class _UnavailableProvider(AIProvider):
+    """Stands in for a provider that could not be set up (e.g. missing model).
+
+    It keeps the rest of the chain usable and puts the reason into the error
+    text, instead of one misconfigured provider breaking everything.
+    """
+
+    def __init__(self, name, error):
+        self.name = name
+        self._error = str(error)
+
+    def ensure_ready(self):
+        raise RuntimeError(self._error)
+
+    def complete_json(self, prompt, image_urls=()):
+        raise ProviderError(self._error)
+
+
+PROVIDERS = {
+    "groq": GroqProvider,
+    "gemini": GeminiProvider,
+    "openai": OpenAIProvider,
+}
+
+
+def _provider_names(names=None):
+    """Parse "groq,gemini" (argument or AI_PROVIDER) into an ordered name list."""
+    raw = names or os.environ.get("AI_PROVIDER") or "groq"
+    parsed = [part.strip().lower() for part in raw.split(",") if part.strip()]
+
+    for key in parsed:
+        if key not in PROVIDERS:
+            raise RuntimeError(
+                f"Unknown AI provider '{key}'. Choose one of: {sorted(PROVIDERS)}"
+            )
+
+    return parsed or ["groq"]
 
 
 def create_provider(name=None, client=None, timeout=REQUEST_TIMEOUT):
-    """Build the provider named by `name` or the AI_PROVIDER variable (default groq)."""
-    key = (name or os.environ.get("AI_PROVIDER") or "groq").strip().lower()
-
-    if key not in PROVIDERS:
-        raise RuntimeError(
-            f"Unknown AI provider '{key}'. Choose one of: {sorted(PROVIDERS)}"
-        )
-
+    """Build the first provider named by `name` or AI_PROVIDER (default groq)."""
+    key = _provider_names(name)[0]
     return PROVIDERS[key].from_env(client=client, timeout=timeout)
+
+
+def create_providers(names=None, client=None, timeout=REQUEST_TIMEOUT):
+    """Build every provider in the list, in order, for failover.
+
+    A provider that cannot be set up becomes an _UnavailableProvider instead of
+    raising, so the others still work. A given `client` goes to the first one.
+    """
+    providers = []
+
+    for index, key in enumerate(_provider_names(names)):
+        try:
+            providers.append(
+                PROVIDERS[key].from_env(
+                    client=client if index == 0 else None, timeout=timeout
+                )
+            )
+        except RuntimeError as exc:
+            providers.append(_UnavailableProvider(key, exc))
+
+    return providers
 
 
 class ResponseValidator:
@@ -323,27 +437,41 @@ class ResponseValidator:
     def allowed_values(self):
         return self._allowed
 
-    def validate(self, text):
+    def expected_fields(self, has_photos=False):
+        """Return the active schema fields based on whether photos were sent."""
+        if has_photos:
+            return list(self._fields)
+        return [f for f in self._fields if f not in PHOTO_ONLY_FIELDS]
+
+    def validate(self, text, has_photos=False):
         """Validate the AI response and return the required structured fields."""
         if not isinstance(text, str):
             raise ValueError("AI response must be a string.")
 
+        cleaned = text.strip()
+        if cleaned.startswith("```"):
+            lines = cleaned.splitlines()
+            if len(lines) >= 2 and lines[-1].strip() == "```":
+                cleaned = "\n".join(lines[1:-1]).strip()
+
         try:
-            data = json.loads(text)
+            data = json.loads(cleaned)
         except json.JSONDecodeError as exc:
             raise ValueError("AI returned invalid JSON.") from exc
 
         if not isinstance(data, dict):
             raise ValueError("AI response must be a JSON object.")
 
+        active_fields = self.expected_fields(has_photos=has_photos)
+
         # Reject extra keys too, so the output matches the schema exactly.
-        unexpected = [field for field in data if field not in self._fields]
+        unexpected = [field for field in data if field not in active_fields]
         if unexpected:
             raise ValueError(
                 f"AI response contains unexpected fields: {unexpected}"
             )
 
-        missing = [f for f in self._fields if f not in data]
+        missing = [f for f in active_fields if f not in data]
         if missing:
             raise ValueError(
                 f"AI response is missing required fields: {missing}"
@@ -351,7 +479,7 @@ class ResponseValidator:
 
         validated = {}
 
-        for field in self._fields:
+        for field in active_fields:
             value = data[field]
 
             if not isinstance(value, str):
@@ -381,17 +509,40 @@ class PromptBuilder:
             allowed_values if allowed_values is not None else ALLOWED_VALUES
         )
 
-    def build(self, incident_report):
+    def build(self, incident_report, photo_count=0):
         report_json = json.dumps(
             incident_report,
             ensure_ascii=False,
             indent=2,
         )
 
+        active_fields = (
+            list(self._fields)
+            if photo_count > 0
+            else [f for f in self._fields if f not in PHOTO_ONLY_FIELDS]
+        )
+
         allowed_section = "\n\n".join(
             f"{field}:\n" + "\n".join(f"- {v}" for v in self._allowed[field])
-            for field in self._fields
+            for field in active_fields
         )
+
+        photo_section = ""
+        if photo_count:
+            photo_section = f"""Photos:
+{photo_count} photo(s) of the observation are attached to this request.
+- Compare the attached photo(s) against the user's written description and set
+  photo_match to MATCHED if the visual evidence aligns with the described
+  safety issue or scene. Set photo_match to UNMATCHED if the photo contradicts
+  the description, shows an unrelated scene, or does not support the written report.
+- Use them together with the written text to judge issue_clarity and
+  safety_category. A photo that clearly shows a hazard can make a short
+  description CLEAR, and a visible hazard can decide the safety_category.
+- Judge location_quality, date_quality and time_quality from the written
+  report only. Do not infer them from the photos.
+- Do not invent details that are not visible.
+
+"""
 
         return f"""
 
@@ -401,7 +552,7 @@ Your task is to assess the clarity and completeness of the information
 provided and organise it into the required structured fields.
 
 Return ONLY one valid JSON object containing exactly these fields:
-{json.dumps(self._fields)}
+{json.dumps(active_fields)}
 
 Use only the following allowed values:
 
@@ -418,24 +569,24 @@ Rules:
 4. Set location_quality to MISSING when no location is provided.
    Use ADEQUATE when the location is sufficiently specific for follow-up.
    Use VAGUE when a location is provided but is not sufficiently specific.
-4. Set date_quality to MISSING when no date information is provided.
+5. Set date_quality to MISSING when no date information is provided.
    Use EXACT when a specific calendar date is given.
    Use APPROXIMATE when only relative or imprecise date information is given.
-5. Set time_quality to MISSING when no time information is provided.
+6. Set time_quality to MISSING when no time information is provided.
    Use EXACT when a specific time is given.
    Use APPROXIMATE when only a general period, such as morning or
    afternoon, is provided.
-6. Choose the safety_category that best describes the concern.
-7. Use OTHER when the concern is understandable but does not fit
+7. Choose the safety_category that best describes the concern.
+8. Use OTHER when the concern is understandable but does not fit
    another listed category.
-8. Use UNCLEAR for safety_category when the concern cannot be identified
+9. Use UNCLEAR for safety_category when the concern cannot be identified
    from the available information.
-9. Do not invent missing information.
-10. Return only the five required fields and use only their allowed values.
-11. Do not provide explanations, recommendations, severity assessments,
+10. Do not invent missing information.
+11. Return only the {len(active_fields)} required fields and use only their allowed values.
+12. Do not provide explanations, recommendations, severity assessments,
     injury assessments, or additional fields.
 
-Incident report:
+{photo_section}Incident report:
 {report_json}
 """.strip()
 
@@ -502,10 +653,14 @@ class PhotoLoader:
 
 
 class AIManager:
-    """Sends one incident report to the AI model and returns validated fields.
+    """Sends one incident report to the AI and returns validated fields.
+
+    Give it one provider or an ordered list. Providers are tried in order and
+    the next one steps in only when the previous one fails (error, timeout,
+    rate limit, missing key, or a reply that does not match the schema).
 
     Every collaborator can be injected (handy for tests); anything left out
-    gets a sensible default. The provider is created on first use, so building
+    gets a sensible default. Providers are created on first use, so building
     an AIManager never needs an API key.
     """
 
@@ -516,8 +671,15 @@ class AIManager:
         validator=None,
         prompt_builder=None,
         photo_loader=None,
+        providers=None,
     ):
-        self._provider = provider
+        if providers:
+            self._providers = list(providers)
+        elif provider is not None:
+            self._providers = [provider]
+        else:
+            self._providers = None
+
         self._config = config or AIConfig()
         self._validator = validator or ResponseValidator()
         self._prompts = prompt_builder or PromptBuilder(
@@ -534,24 +696,38 @@ class AIManager:
         return self._photos
 
     @property
-    def provider(self):
-        if self._provider is None:
-            self._provider = create_provider(
+    def providers(self):
+        if self._providers is None:
+            self._providers = create_providers(
                 timeout=self._config.request_timeout
             )
-        return self._provider
+        return self._providers
 
     def ensure_ready(self):
-        """Raise RuntimeError early if the provider is not set up."""
-        self.provider.ensure_ready()
+        """Raise RuntimeError early if no provider is usable."""
+        providers = self.providers
+
+        if len(providers) == 1:
+            providers[0].ensure_ready()
+            return
+
+        problems = []
+        for provider in providers:
+            try:
+                provider.ensure_ready()
+                return  # one usable provider is enough to start
+            except RuntimeError as exc:
+                problems.append(f"{provider.name} failed: {exc}")
+
+        raise RuntimeError("No AI provider is ready. " + " | ".join(problems))
 
     def analyze_incident(self, incident_report, photo_paths=None):
         """Analyse an incident report and return the validated fields.
 
-        Raises RuntimeError if every attempt fails or a non-retryable error occurs.
+        Tries each provider in order. Raises RuntimeError if all of them fail;
+        the message names every provider and why it failed.
         """
-        provider = self.provider
-        prompt = self._prompts.build(incident_report)
+        providers = self.providers
         image_urls = []
 
         for photo_path in photo_paths or []:
@@ -560,8 +736,55 @@ class AIManager:
             except (OSError, ValueError) as exc:
                 logger.warning("Skipping unusable photo %s: %s", photo_path, exc)
 
-        max_attempts = self._config.max_attempts
+        # Count only photos that were really encoded, so the prompt never
+        # mentions a photo the model did not receive.
+        prompt = self._prompts.build(incident_report, len(image_urls))
+
+        failures = []
+
+        for index, provider in enumerate(providers):
+            is_last = index == len(providers) - 1
+            # Fail over quickly; only the last provider gets the full patience.
+            attempts = (
+                self._config.max_attempts
+                if is_last
+                else self._config.fallback_attempts
+            )
+
+            try:
+                fields = self._analyze_with(provider, prompt, image_urls, attempts)
+            except RuntimeError as exc:
+                if len(providers) == 1:
+                    raise  # single provider: keep the original error as is
+
+                failures.append((provider.name, exc))
+
+                if not is_last:
+                    logger.warning(
+                        "%s failed (%s); falling back to %s",
+                        provider.name,
+                        exc,
+                        providers[index + 1].name,
+                    )
+                continue
+
+            if failures:
+                logger.info(
+                    "Analysis completed by %s after %s failed",
+                    provider.name,
+                    ", ".join(name for name, _ in failures),
+                )
+            return fields
+
+        raise RuntimeError(
+            "All AI providers failed. "
+            + " | ".join(f"{name} failed: {exc}" for name, exc in failures)
+        ) from failures[-1][1]
+
+    def _analyze_with(self, provider, prompt, image_urls, max_attempts):
+        """Try one provider up to max_attempts times; raise RuntimeError if it fails."""
         last_error = None
+        has_photos = bool(image_urls)
 
         for attempt in range(1, max_attempts + 1):
             try:
@@ -571,12 +794,13 @@ class AIManager:
                     raise ValueError("AI returned an empty response.")
 
                 # Preserve the AI classification; the Logic Manager decides readiness.
-                return self._validator.validate(text)
+                return self._validator.validate(text, has_photos=has_photos)
 
             except (ValueError, RetryableProviderError) as exc:
                 last_error = exc
                 logger.warning(
-                    "Incident analysis attempt %s/%s failed: %s",
+                    "%s attempt %s/%s failed: %s",
+                    provider.name,
                     attempt,
                     max_attempts,
                     exc,
@@ -585,20 +809,30 @@ class AIManager:
                 if attempt < max_attempts:
                     time.sleep(self._retry_delay(attempt, exc))
 
-            # ProviderError (non-retryable) is not caught: it ends the loop.
+            # ProviderError (non-retryable, or a missing key) is a RuntimeError
+            # and is not caught here: it ends this provider's attempts.
 
+        plural = "attempt" if max_attempts == 1 else "attempts"
         raise RuntimeError(
-            f"Incident analysis failed after {max_attempts} attempts: {last_error}"
+            f"Incident analysis failed after {max_attempts} {plural}: {last_error}"
         ) from last_error
 
     def make_result(self, reference_id, fields=None, error=None):
-        """Every report yields the same keys, success or failure."""
+        """Build the output dict for one report.
+
+        Photo-only fields (such as photo_match) are omitted completely when
+        no photo was analyzed.
+        """
         result = {
             "reference_id": reference_id,
             "status": "error" if error else "success",
         }
 
         for field in self._validator.fields:
+            if field in PHOTO_ONLY_FIELDS and (
+                error or not fields or field not in fields
+            ):
+                continue
             result[field] = fields[field] if fields and not error else None
 
         result["error"] = str(error) if error else None
@@ -720,15 +954,20 @@ class ReportBatchAnalyzer:
 # its own AIManager instance.
 
 def get_client():
-    return create_provider().get_client()
+    # main.py / web_app.py treat this as an opaque "client" and hand it back to
+    # analyze_incident, so returning the whole failover manager gives them
+    # fallback without any change on their side.
+    manager = AIManager()
+    manager.ensure_ready()
+    return manager
 
 
-def validate_response(text):
-    return ResponseValidator().validate(text)
+def validate_response(text, has_photos=False):
+    return ResponseValidator().validate(text, has_photos=has_photos)
 
 
-def build_prompt(incident_report):
-    return PromptBuilder().build(incident_report)
+def build_prompt(incident_report, photo_count=0):
+    return PromptBuilder().build(incident_report, photo_count)
 
 
 def encode_image(photo_path):
@@ -739,9 +978,15 @@ def collect_photo_paths(case_details, project_dir):
     return PhotoLoader().collect_paths(case_details, project_dir)
 
 
+def _manager_for(client):
+    """Accept either a manager from get_client() or a raw SDK client."""
+    if isinstance(client, AIManager):
+        return client
+    return AIManager(providers=create_providers(client=client))
+
+
 def analyze_incident(client, incident_report, photo_paths=None):
-    manager = AIManager(provider=create_provider(client=client))
-    return manager.analyze_incident(incident_report, photo_paths)
+    return _manager_for(client).analyze_incident(incident_report, photo_paths)
 
 
 def make_result(reference_id, fields=None, error=None):
@@ -749,9 +994,7 @@ def make_result(reference_id, fields=None, error=None):
 
 
 def process_report(client, report_path, project_dir, client_error=None):
-    analyzer = ReportBatchAnalyzer(
-        ai=AIManager(provider=create_provider(client=client))
-    )
+    analyzer = ReportBatchAnalyzer(ai=_manager_for(client))
     return analyzer.process_report(report_path, project_dir, client_error)
 
 
