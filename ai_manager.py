@@ -242,7 +242,8 @@ class GroqProvider(ChatCompletionsProvider):
         return groq
 
     def _create_client(self):
-        api_key = os.environ.get(self.API_KEY_ENV)
+        # strip() guards against a stray \r from a Windows (CRLF) .env file
+        api_key = (os.environ.get(self.API_KEY_ENV) or "").strip()
 
         if not api_key:
             raise RuntimeError(
@@ -303,7 +304,7 @@ class OpenAIProvider(ChatCompletionsProvider):
         return openai
 
     def _create_client(self):
-        api_key = os.environ.get(self._api_key_env)
+        api_key = (os.environ.get(self._api_key_env) or "").strip()
 
         if not api_key:
             raise RuntimeError(

@@ -1,12 +1,15 @@
 
 """Main entry point for SafeReport."""
 
+import logging
 from pathlib import Path
 
 import io_manager
 import ai_manager
 import logic_manager
 import data_manager
+
+logger = logging.getLogger(__name__)
 
 MAX_CLARIFICATION_ATTEMPTS = 5 #max clarification reassessments per workflow (if the user keeps giving info and groq keeps returning NEEDS_CLARIFICATION)
 
@@ -48,7 +51,8 @@ class SafeReportApplication:
 
         try:
             self._ai.ensure_ready()
-        except RuntimeError:
+        except RuntimeError as exc:
+            logger.error("AI provider not ready for %s: %s", reference_id, exc)
             self.handle_ai_failure(reference_id, "CONFIG_MISSING")
             return
 
@@ -69,7 +73,8 @@ class SafeReportApplication:
             ai_fields = self._ai.analyze_incident(
                 incident_data, photo_paths
             )
-        except RuntimeError:
+        except RuntimeError as exc:
+            logger.error("AI assessment failed for %s: %s", reference_id, exc)
             self.handle_ai_failure(reference_id, "AI_FAILED")
             return
 
