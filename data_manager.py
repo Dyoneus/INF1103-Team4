@@ -2,7 +2,7 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from report_store import save_report as save_raw_report
+from report_store import ReportStorage
 from database_manager import DatabaseManager
 
 REPORTS_DIR = Path("reports")
@@ -13,10 +13,10 @@ class DataManager:
             database = DatabaseManager()
 
         self.database = database
+        self.storage = ReportStorage()
         self.database_ready = self.database.initialize_database()
 
-        # Import legacy JSON reports once at startup, so later reads
-        # can go straight to SQLite.
+        # Import legacy JSON reports once at startup
         self.legacy_import_ok = self.migrate_reports()
 
         if self.database_ready and not self.legacy_import_ok:
@@ -105,7 +105,7 @@ class DataManager:
             raise OSError("SQLite database is not ready.")
 
         try:
-            report_path = save_raw_report(report)
+            report_path = self.storage.save_report(report)
 
             if not report_path:
                 raise OSError("No report path was returned.")
