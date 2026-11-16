@@ -617,20 +617,36 @@ def test_uploads_are_removed_even_if_the_request_fails():
 
     assert not Path(paths[0]).exists()
 
-def test_create_app_supplies_ai_manager_instance(monkeypatch):
+def test_create_app_supplies_manager_instances(monkeypatch):
     from unittest.mock import Mock
     import ai_manager
+    import data_manager
+    import logic_manager
     import web_app
 
     ai = Mock(spec=ai_manager.AIManager)
+    logic = Mock(spec=logic_manager.LogicManager)
+    data = Mock(spec=data_manager.DataManager)
+
     ai_class = Mock(return_value=ai)
+    logic_class = Mock(return_value=logic)
+    data_class = Mock(return_value=data)
     web_class = Mock()
 
     monkeypatch.setattr(ai_manager, "AIManager", ai_class)
+    monkeypatch.setattr(logic_manager, "LogicManager", logic_class)
+    monkeypatch.setattr(data_manager, "DataManager", data_class)
     monkeypatch.setattr(web_app, "SafeReportWebApp", web_class)
 
     flask_app = web_app.create_app()
 
     ai_class.assert_called_once_with()
-    assert web_class.call_args.kwargs["ai_manager"] is ai
+    logic_class.assert_called_once_with()
+    data_class.assert_called_once_with()
+    web_class.assert_called_once()
+
+    arguments = web_class.call_args.kwargs
+    assert arguments["ai_manager"] is ai
+    assert arguments["logic_manager"] is logic
+    assert arguments["data_manager"] is data
     assert flask_app is web_class.return_value.flask_app

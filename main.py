@@ -307,12 +307,13 @@ def clarify_report():
     return application.clarify_report()
 
 def run():
-    #create the application using the current manager interfaces
+    #create the managers and start the console application
+    
     application = SafeReportApplication(
-        io_manager=io_manager,
+        io_manager=io_manager.IOManager(),
         ai_manager=ai_manager.AIManager(),
         logic_manager=logic_manager.LogicManager(),
-        data_manager=data_manager,
+        data_manager=data_manager.DataManager(),
     )
     return application.run()
 

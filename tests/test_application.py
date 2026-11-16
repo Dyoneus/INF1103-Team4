@@ -103,7 +103,7 @@ def assessment_setup():
     io = Mock(spec=main.io_manager.IOManager)
     ai = Mock(spec=main.ai_manager.AIManager)
     logic = Mock(spec=main.logic_manager.LogicManager)
-    data = Mock(spec=main.data_manager)
+    data = Mock(spec=main.data_manager.DataManager)
     application = main.SafeReportApplication(io, ai, logic, data)
 
     ai.analyze_incident.return_value = {
@@ -844,21 +844,38 @@ def test_menu_load_failure_stops_before_showing_menu(menu_setup):
     application.clarify_report.assert_not_called()
 
 
-def test_existing_run_function_delegates(monkeypatch, logic_instance, ai_instance):
+def test_run_constructs_managers_and_starts_application(monkeypatch):
+    io = Mock(spec=main.io_manager.IOManager)
+    ai = Mock(spec=main.ai_manager.AIManager)
+    logic = Mock(spec=main.logic_manager.LogicManager)
+    data = Mock(spec=main.data_manager.DataManager)
+
+    io_class = Mock(return_value=io)
+    ai_class = Mock(return_value=ai)
+    logic_class = Mock(return_value=logic)
+    data_class = Mock(return_value=data)
     application_class = Mock()
-    monkeypatch.setattr(
-        main, "SafeReportApplication", application_class
-    )
 
-    main.run()
+    monkeypatch.setattr(main.io_manager, "IOManager", io_class)
+    monkeypatch.setattr(main.ai_manager, "AIManager", ai_class)
+    monkeypatch.setattr(main.logic_manager, "LogicManager", logic_class)
+    monkeypatch.setattr(main.data_manager, "DataManager", data_class)
+    monkeypatch.setattr(main, "SafeReportApplication", application_class)
 
+    result = main.run()
+
+    io_class.assert_called_once_with()
+    ai_class.assert_called_once_with()
+    logic_class.assert_called_once_with()
+    data_class.assert_called_once_with()
     application_class.assert_called_once_with(
-        io_manager=main.io_manager,
-        ai_manager=ai_instance,
-        logic_manager=logic_instance,
-        data_manager=main.data_manager,
+        io_manager=io,
+        ai_manager=ai,
+        logic_manager=logic,
+        data_manager=data,
     )
     application_class.return_value.run.assert_called_once_with()
+    assert result is application_class.return_value.run.return_value
 
 def test_assessment_works_with_real_ai_manager(assessment_setup):
     application, io, ai, logic, data, report = assessment_setup

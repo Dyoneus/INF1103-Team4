@@ -178,10 +178,14 @@ def test_corrections_cannot_change_protected_fields(tmp_path, monkeypatch):
     assert not data_manager.save_clarifications("../TEST-001", {"description": "Test"})
     assert path.read_bytes() == before
 
-
 def test_menu_dispatches_saved_workflows(monkeypatch):
+    from unittest.mock import Mock
+
     answer_with(monkeypatch, ["2", "3", "0"])
-    monkeypatch.setattr(data_manager, "load_reports", lambda: [])
+    data = Mock(spec=data_manager.DataManager)
+    data.load_reports.return_value = []
+    data_class = Mock(return_value=data)
+    monkeypatch.setattr(data_manager, "DataManager", data_class)
     calls = []
 
     monkeypatch.setattr(
@@ -198,6 +202,8 @@ def test_menu_dispatches_saved_workflows(monkeypatch):
     main.run()
 
     assert calls == ["retry", "clarify"]
+    data_class.assert_called_once_with()
+    data.load_reports.assert_called_once_with()
 
 
 @pytest.mark.parametrize("script", ["main.py"])

@@ -678,7 +678,7 @@ def create_app() -> Flask:
     web_app = SafeReportWebApp(
         ai_manager=ai_manager.AIManager(),
         logic_manager=logic_manager.LogicManager(),
-        data_manager=data_manager,
+        data_manager=data_manager.DataManager(),
         secret_key=os.environ.get("SAFEREPORT_SECRET_KEY"),
         admin_username=os.environ.get("SAFEREPORT_ADMIN_USERNAME"),
         admin_password=os.environ.get("SAFEREPORT_ADMIN_PASSWORD"),
