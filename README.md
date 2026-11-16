@@ -6,6 +6,7 @@ SafeReport is a terminal application for recording workplace safety reports. It 
 
 - Python 3.12 or later for running locally
 - Docker Desktop (or another Docker Engine) for running in a container
+- Docker Compose v2.24 or later (for optional `.env` file support)
 - A Groq API key for AI assessments (reports can still be saved without it)
 
 ## Run locally
@@ -38,7 +39,7 @@ Clarification answers are saved together before reassessment. Ctrl+C during the 
 
 The interactive application calls AI after saving a new report, retrying a failed assessment, or saving clarification answers. A missing API key leaves the report saved with status `AI_FAILED`, ready to retry after configuration.
 
-For Docker, copy `.env.example` to `.env` and replace `your_groq_api_key_here` with your Groq API key. Docker Compose automatically reads `.env` and passes `GROQ_API_KEY` into the container. Do not commit `.env`.
+For Docker, copy `.env.example` to `.env` and enter the key for your chosen AI provider. Docker Compose passes the AI provider settings and `.env` variables into the containers, including the key named by `AI_API_KEY_ENV`. For an OpenAI-compatible provider, set `AI_PROVIDER=openai`, `AI_MODEL`, `AI_BASE_URL` when needed, and `AI_API_KEY_ENV` to the environment variable holding the key. Do not commit `.env`.
 
 For local use, `.env` is not loaded automatically. Set the key in the current shell before running `python main.py`:
 
@@ -76,9 +77,9 @@ Compose connects folders on your computer to folders inside the container:
 | On your computer | Inside the container | Contents |
 |---|---|---|
 | `reports/` | `/app/reports` | Submitted report JSON files and copied photos |
-| `data/` | `/data` | AI analysis results, including `ai_output.json` |
+| `data/` | `/data` | SQLite database (`safereport.db`) and AI analysis results, including `ai_output.json` |
 
-This is a **bind mount**: the container writes directly into these project folders. Files remain on your computer after the container exits, even though `--rm` removes the temporary container. Docker creates the host folders if they do not already exist.
+This is a **bind mount**: the container writes directly into these project folders. Files remain on your computer after the container exits, even though `--rm` removes the temporary container. The SQLite database path in Docker is `/data/safereport.db`, backed by `data/safereport.db` on your computer. Docker creates the host folders if they do not already exist.
 
 If you do not see a new report, check that you ran the command from the repository root and completed report submission. Then refresh the `reports/` folder in your editor or File Explorer.
 
