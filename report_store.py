@@ -55,10 +55,3 @@ class ReportStorage:
 
         return saved
 
-
-def save_report(report: dict) -> Path:
-    return ReportStorage().save_report(report)
-
-
-def _copy_photos(photo_paths, reference_id):
-    return ReportStorage().copy_photos(photo_paths, reference_id)
