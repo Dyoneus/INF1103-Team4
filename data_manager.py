@@ -277,13 +277,3 @@ class DataManager:
         """Save corrected details and invalidate the old assessment."""
         return self.update_report(reference_id, {}, case_changes=changes)
 
-
-manager = DataManager()
-
-create_report = manager.create_report
-load_reports = manager.load_reports
-update_report = manager.update_report
-save_report = manager.save_report
-save_clarifications = manager.save_clarifications
-filter_by_status = manager.filter_by_status
-get_failed_ai_reports = manager.get_failed_ai_reports

@@ -23,11 +23,10 @@ FIELDS = {
 @pytest.fixture(autouse=True)
 def isolated_database(tmp_path, monkeypatch):
     database = DatabaseManager(tmp_path / "safereport.db")
-    assert database.initialize_database()
-
     monkeypatch.setattr(data_manager, "REPORTS_DIR", tmp_path)
-    monkeypatch.setattr(data_manager.manager, "database", database)
-    monkeypatch.setattr(data_manager.manager, "database_ready", True)
+    manager = data_manager.DataManager(database)
+    assert manager.database_ready
+    return manager
 
 
 def test_database_manager_uses_configured_database_path(tmp_path, monkeypatch):
@@ -49,10 +48,10 @@ def application(isolated_database):
         io_manager.IOManager(),
         ai_manager.AIManager(),
         main.logic_manager.LogicManager(),
-        data_manager.manager,
+        isolated_database,
     )
 
-def saved_report(tmp_path, monkeypatch, status, codes=None, in_database=True):
+def saved_report(tmp_path, monkeypatch, isolated_database, status, codes=None, in_database=True):
     monkeypatch.setattr(data_manager, "REPORTS_DIR", tmp_path)
     report = {
         "reference_id": "TEST-001", "submitted_at": "2026-01-01T12:00:00",
@@ -70,7 +69,7 @@ def saved_report(tmp_path, monkeypatch, status, codes=None, in_database=True):
     path.write_text(json.dumps(report), encoding="utf-8")
     if in_database:
         # load_reports() reads SQLite only, so seed the database as well.
-        assert data_manager.manager.database.create_report(report)
+        assert isolated_database.database.create_report(report)
     return path, report
 
 
@@ -84,8 +83,8 @@ def successful_ai(monkeypatch):
     monkeypatch.setattr(ai_manager.AIManager, "analyze_incident", lambda *args: FIELDS)
 
 
-def test_retry_updates_original_record(tmp_path, monkeypatch, application):
-    path, original = saved_report(tmp_path, monkeypatch, "AI_FAILED")
+def test_retry_updates_original_record(tmp_path, monkeypatch, application, isolated_database):
+    path, original = saved_report(tmp_path, monkeypatch, isolated_database, "AI_FAILED")
     answer_with(monkeypatch, ["TEST-001"])
     monkeypatch.setattr(ai_manager.AIManager, "ensure_ready", lambda self: None)
 
@@ -103,12 +102,12 @@ def test_retry_updates_original_record(tmp_path, monkeypatch, application):
     for field in ("case_details", "reporter", "submitted_at"):
         assert result[field] == original[field]
     assert len(list(tmp_path.glob("*.json"))) == 1
-    assert data_manager.manager.database.load_reports() == [result]
+    assert isolated_database.database.load_reports() == [result]
 
 
-def test_clarification_saves_before_ai_and_reassesses(tmp_path, monkeypatch, application):
+def test_clarification_saves_before_ai_and_reassesses(tmp_path, monkeypatch, application, isolated_database):
     path, original = saved_report(
-        tmp_path, monkeypatch, "NEEDS_CLARIFICATION", ["CLARIFY_LOCATION"]
+        tmp_path, monkeypatch, isolated_database, "NEEDS_CLARIFICATION", ["CLARIFY_LOCATION"]
     )
     answer_with(monkeypatch, ["1", "Block 30, third floor, north stairwell"])
     monkeypatch.setattr(ai_manager.AIManager, "ensure_ready", lambda self: None)
@@ -128,11 +127,11 @@ def test_clarification_saves_before_ai_and_reassesses(tmp_path, monkeypatch, app
     assert result["reporter"] == original["reporter"]
     assert result["case_details"]["photos"] == original["case_details"]["photos"]
     assert len(list(tmp_path.glob("*.json"))) == 1
-    assert data_manager.manager.database.load_reports() == [result]
+    assert isolated_database.database.load_reports() == [result]
 
 
-def test_corrections_survive_ai_failure_and_can_be_retried(tmp_path, monkeypatch, application):
-    path, _ = saved_report(tmp_path, monkeypatch, "INCOMPLETE", ["CLARIFY_OBSERVATION"])
+def test_corrections_survive_ai_failure_and_can_be_retried(tmp_path, monkeypatch, application, isolated_database):
+    path, _ = saved_report(tmp_path, monkeypatch, isolated_database, "INCOMPLETE", ["CLARIFY_OBSERVATION"])
     answer_with(monkeypatch, ["1", "Sparks are coming from an exposed cable."])
 
     def missing_client(self):
@@ -143,15 +142,15 @@ def test_corrections_survive_ai_failure_and_can_be_retried(tmp_path, monkeypatch
     result = json.loads(path.read_text(encoding="utf-8"))
     assert result["case_details"]["description"].startswith("Sparks")
     assert result["assessment"]["status"] == "AI_FAILED"
-    assert data_manager.get_failed_ai_reports()[0]["reference_id"] == "TEST-001"
+    assert isolated_database.get_failed_ai_reports()[0]["reference_id"] == "TEST-001"
     successful_ai(monkeypatch)
     answer_with(monkeypatch, ["1"])
     application.retry_failed_report()
     assert json.loads(path.read_text(encoding="utf-8"))["assessment"]["status"] == "READY_FOR_REVIEW"
 
 
-def test_clarification_cancel_does_not_save_partial_answers(tmp_path, monkeypatch, application):
-    path, _ = saved_report(tmp_path, monkeypatch, "INCOMPLETE", ["CLARIFY_OBSERVATION", "ADD_LOCATION"])
+def test_clarification_cancel_does_not_save_partial_answers(tmp_path, monkeypatch, application, isolated_database):
+    path, _ = saved_report(tmp_path, monkeypatch, isolated_database, "INCOMPLETE", ["CLARIFY_OBSERVATION", "ADD_LOCATION"])
     before = path.read_bytes()
     responses = iter(["1", "A clearer description"])
 
@@ -166,8 +165,8 @@ def test_clarification_cancel_does_not_save_partial_answers(tmp_path, monkeypatc
     assert path.read_bytes() == before
 
 
-def test_failed_correction_save_keeps_original_and_skips_ai(tmp_path, monkeypatch, application):
-    path, _ = saved_report(tmp_path, monkeypatch, "NEEDS_CLARIFICATION", ["CLARIFY_LOCATION"])
+def test_failed_correction_save_keeps_original_and_skips_ai(tmp_path, monkeypatch, application, isolated_database):
+    path, _ = saved_report(tmp_path, monkeypatch, isolated_database, "NEEDS_CLARIFICATION", ["CLARIFY_LOCATION"])
     before = path.read_bytes()
     answer_with(monkeypatch, ["1", "Block 30"])
 
@@ -197,11 +196,11 @@ def test_select_report_by_reference_or_cancel(monkeypatch, choice):
     assert io_manager.select_saved_report([report]) == (None if choice == "0" else report)
 
 
-def test_corrections_cannot_change_protected_fields(tmp_path, monkeypatch):
-    path, _ = saved_report(tmp_path, monkeypatch, "INCOMPLETE")
+def test_corrections_cannot_change_protected_fields(tmp_path, monkeypatch, isolated_database):
+    path, _ = saved_report(tmp_path, monkeypatch, isolated_database, "INCOMPLETE")
     before = path.read_bytes()
-    assert not data_manager.save_clarifications("TEST-001", {"photos": []})
-    assert not data_manager.save_clarifications("../TEST-001", {"description": "Test"})
+    assert not isolated_database.save_clarifications("TEST-001", {"photos": []})
+    assert not isolated_database.save_clarifications("../TEST-001", {"description": "Test"})
     assert path.read_bytes() == before
 
 def test_menu_dispatches_saved_workflows(monkeypatch):
@@ -243,28 +242,28 @@ def test_script_entrypoints_open_menu(script, tmp_path):
     assert "2. Retry a failed assessment" in result.stdout
     assert "3. Clarify and reassess" in result.stdout
 
-def test_legacy_json_is_migrated_without_duplicates(tmp_path, monkeypatch):
+def test_legacy_json_is_migrated_without_duplicates(tmp_path, monkeypatch, isolated_database):
     _, original = saved_report(
-        tmp_path, monkeypatch, "AI_FAILED", in_database=False
+        tmp_path, monkeypatch, isolated_database, "AI_FAILED", in_database=False
     )
 
-    assert data_manager.load_reports() == []
-    assert data_manager.manager.migrate_reports()
-    assert data_manager.manager.migrate_reports()
-    assert data_manager.load_reports() == [original]
-    assert data_manager.manager.database.load_reports() == [original]
+    assert isolated_database.load_reports() == []
+    assert isolated_database.migrate_reports()
+    assert isolated_database.migrate_reports()
+    assert isolated_database.load_reports() == [original]
+    assert isolated_database.database.load_reports() == [original]
 
 
-def test_invalid_legacy_json_fails_migration_but_not_loading(tmp_path):
+def test_invalid_legacy_json_fails_migration_but_not_loading(tmp_path, isolated_database):
     (tmp_path / "broken.json").write_text("{", encoding="utf-8")
 
-    assert not data_manager.manager.migrate_reports()
-    assert data_manager.load_reports() == []
+    assert not isolated_database.migrate_reports()
+    assert isolated_database.load_reports() == []
 
 
-def test_legacy_json_is_imported_once_at_startup(tmp_path, monkeypatch):
+def test_legacy_json_is_imported_once_at_startup(tmp_path, monkeypatch, isolated_database):
     _, original = saved_report(
-        tmp_path, monkeypatch, "AI_FAILED", in_database=False
+        tmp_path, monkeypatch, isolated_database, "AI_FAILED", in_database=False
     )
     database = DatabaseManager(tmp_path / "startup.db")
 
@@ -274,18 +273,14 @@ def test_legacy_json_is_imported_once_at_startup(tmp_path, monkeypatch):
     assert manager.load_reports() == [original]
 
 
-def test_unavailable_database_reports_load_failure(monkeypatch):
-    monkeypatch.setattr(
-        data_manager.manager, "database_ready", False
-    )
+def test_unavailable_database_reports_load_failure(isolated_database):
+    isolated_database.database_ready = False
 
-    assert data_manager.load_reports() is None
+    assert isolated_database.load_reports() is None
 
 
-def test_unavailable_database_raises_on_create(monkeypatch):
-    monkeypatch.setattr(
-        data_manager.manager, "database_ready", False
-    )
+def test_unavailable_database_raises_on_create(isolated_database):
+    isolated_database.database_ready = False
 
     with pytest.raises(OSError):
-        data_manager.create_report({})
+        isolated_database.create_report({})
