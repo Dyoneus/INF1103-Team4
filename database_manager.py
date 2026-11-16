@@ -1,9 +1,14 @@
+import json
+import os
 import sqlite3
 from pathlib import Path
-import json
 
 class DatabaseManager:
-    def __init__(self, database_path = "data/safereport.db"):
+    def __init__(self, database_path=None):
+        if database_path is None:
+            database_path = os.environ.get(
+                "SAFEREPORT_DATABASE_PATH", "data/safereport.db"
+            )
         self.database_path = database_path
 
     def initialize_database(self):

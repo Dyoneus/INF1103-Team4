@@ -29,6 +29,20 @@ def isolated_database(tmp_path, monkeypatch):
     monkeypatch.setattr(data_manager.manager, "database", database)
     monkeypatch.setattr(data_manager.manager, "database_ready", True)
 
+
+def test_database_manager_uses_configured_database_path(tmp_path, monkeypatch):
+    database_path = tmp_path / "persistent" / "safereport.db"
+    monkeypatch.setenv("SAFEREPORT_DATABASE_PATH", str(database_path))
+
+    database = DatabaseManager()
+
+    assert database.initialize_database()
+    assert database_path.is_file()
+    report = {"reference_id": "PERSISTED-001"}
+    assert database.create_report(report)
+    assert DatabaseManager().load_reports() == [report]
+
+
 @pytest.fixture
 def application(isolated_database):
     return main.SafeReportApplication(
