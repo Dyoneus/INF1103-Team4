@@ -38,7 +38,7 @@ def application(isolated_database):
         data_manager.manager,
     )
 
-def saved_report(tmp_path, monkeypatch, status, codes=None):
+def saved_report(tmp_path, monkeypatch, status, codes=None, in_database=True):
     monkeypatch.setattr(data_manager, "REPORTS_DIR", tmp_path)
     report = {
         "reference_id": "TEST-001", "submitted_at": "2026-01-01T12:00:00",
@@ -54,6 +54,9 @@ def saved_report(tmp_path, monkeypatch, status, codes=None):
     }
     path = tmp_path / "TEST-001.json"
     path.write_text(json.dumps(report), encoding="utf-8")
+    if in_database:
+        # load_reports() reads SQLite only, so seed the database as well.
+        assert data_manager.manager.database.create_report(report)
     return path, report
 
 
@@ -228,16 +231,39 @@ def test_script_entrypoints_open_menu(script, tmp_path):
 
 def test_legacy_json_is_migrated_without_duplicates(tmp_path, monkeypatch):
     _, original = saved_report(
-        tmp_path, monkeypatch, "AI_FAILED"
+        tmp_path, monkeypatch, "AI_FAILED", in_database=False
     )
 
-    assert data_manager.load_reports() == [original]
+    assert data_manager.load_reports() == []
+    assert data_manager.manager.migrate_reports()
+    assert data_manager.manager.migrate_reports()
     assert data_manager.load_reports() == [original]
     assert data_manager.manager.database.load_reports() == [original]
 
 
-def test_invalid_legacy_json_reports_load_failure(tmp_path):
+def test_invalid_legacy_json_fails_migration_but_not_loading(tmp_path):
     (tmp_path / "broken.json").write_text("{", encoding="utf-8")
+
+    assert not data_manager.manager.migrate_reports()
+    assert data_manager.load_reports() == []
+
+
+def test_legacy_json_is_imported_once_at_startup(tmp_path, monkeypatch):
+    _, original = saved_report(
+        tmp_path, monkeypatch, "AI_FAILED", in_database=False
+    )
+    database = DatabaseManager(tmp_path / "startup.db")
+
+    manager = data_manager.DataManager(database)
+
+    assert manager.legacy_import_ok
+    assert manager.load_reports() == [original]
+
+
+def test_unavailable_database_reports_load_failure(monkeypatch):
+    monkeypatch.setattr(
+        data_manager.manager, "database_ready", False
+    )
 
     assert data_manager.load_reports() is None
 
