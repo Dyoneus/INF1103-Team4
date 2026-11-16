@@ -50,12 +50,11 @@ class FakeAI:
         self.calls = []
         self.photos_existed = []
 
-    def get_client(self):
+    def ensure_ready(self):
         if not self.configured:
             raise RuntimeError("GROQ_API_KEY is not configured.")
-        return object()
 
-    def analyze_incident(self, client, incident_report, photo_paths=None):
+    def analyze_incident(self, incident_report, photo_paths=None):
         self.calls.append((incident_report, list(photo_paths or [])))
         self.photos_existed.append([Path(path).is_file() for path in photo_paths or []])
         if self.fails:
@@ -147,29 +146,69 @@ def make_client(tmp_path):
     return factory
 
 
+def test_health_endpoint_returns_ok(make_client):
+    response = make_client().get("/health")
+
+    assert response.status_code == 200
+    assert response.get_json() == {"status": "ok"}
+
+
 # Dashboard
 
 def test_dashboard_lists_reports_with_status_and_location_ranking(make_client):
     data = FakeData([
-        make_report("R-1", "READY_FOR_REVIEW"),
-        make_report("R-2", "AI_FAILED"),
+        make_report(
+            "R-1", "READY_FOR_REVIEW",
+            workplace_location="  Hougang   Avenue  1  ",
+        ),
+        make_report(
+            "R-2", "AI_FAILED",
+            workplace_location="hougang avenue 1",
+        ),
         make_report("R-3", workplace_location="Jurong"),
+        make_report("R-4", "READY_FOR_REVIEW", workplace_location="Ang Mo Kio"),
     ])
 
-    page = make_client(data=data).get("/admin").get_data(as_text=True)
+    response = make_client(data=data).get("/admin")
+    page = response.get_data(as_text=True)
 
-    assert all(reference in page for reference in ("R-1", "R-2", "R-3"))
-    assert "Ready for review" in page and "Assessment failed" in page and "Not assessed" in page
-    # The Logic Manager's location summary: Hougang has two reports, Jurong one.
-    assert page.index("<span>Hougang</span><b>2</b>") < page.index("<span>Jurong</span><b>1</b>")
+    assert response.status_code == 200
+    assert all(reference in page for reference in ("R-1", "R-2", "R-3", "R-4"))
+    assert "Ready for review" in page
+    assert "Assessment failed" in page
+    assert "Not assessed" in page
+
+    ranking = page.split('<ol class="ranking">', 1)[1].split("</ol>", 1)[0]
+    hougang = "<span>Hougang Avenue 1</span><b>2</b>"
+    ang_mo_kio = "<span>Ang Mo Kio</span><b>1</b>"
+    jurong = "<span>Jurong</span><b>1</b>"
+
+    # Case and spacing differences must produce one location group.
+    assert ranking.count("<li>") == 3
+    # Highest report count first; alphabetical order breaks a tie.
+    assert ranking.index(hougang) < ranking.index(ang_mo_kio) < ranking.index(jurong)
 
 
 def test_dashboard_filters_by_status(make_client):
-    data = FakeData([make_report("R-1", "READY_FOR_REVIEW"), make_report("R-2", "AI_FAILED")])
+    data = FakeData([
+        make_report("R-1", "READY_FOR_REVIEW"),
+        make_report("R-2", "AI_FAILED"),
+        make_report("R-3", "AI_FAILED", workplace_location="Jurong"),
+    ])
 
-    page = make_client(data=data).get("/admin?status=AI_FAILED").get_data(as_text=True)
+    response = make_client(data=data).get("/admin?status=AI_FAILED")
+    page = response.get_data(as_text=True)
 
-    assert "R-2" in page and "R-1" not in page
+    assert response.status_code == 200
+    assert "R-2" in page and "R-3" in page
+    assert "R-1" not in page
+
+    # The status filter changes the table; the summaries cover all reports.
+    assert ">All <b>3</b>" in page
+    assert ">Ready for review <b>1</b>" in page
+    assert ">Assessment failed <b>2</b>" in page
+    assert "<span>Hougang</span><b>2</b>" in page
+    assert "<span>Jurong</span><b>1</b>" in page
 
 
 def test_dashboard_reports_a_load_failure_without_crashing(make_client):
@@ -617,3 +656,137 @@ def test_uploads_are_removed_even_if_the_request_fails():
             raise RuntimeError("boom")
 
     assert not Path(paths[0]).exists()
+
+def test_create_app_supplies_manager_instances(monkeypatch):
+    from unittest.mock import Mock
+    import ai_manager
+    import data_manager
+    import logic_manager
+    import web_app
+
+    ai = Mock(spec=ai_manager.AIManager)
+    logic = Mock(spec=logic_manager.LogicManager)
+    data = Mock(spec=data_manager.DataManager)
+
+    ai_class = Mock(return_value=ai)
+    logic_class = Mock(return_value=logic)
+    data_class = Mock(return_value=data)
+    web_class = Mock()
+
+    monkeypatch.setattr(ai_manager, "AIManager", ai_class)
+    monkeypatch.setattr(logic_manager, "LogicManager", logic_class)
+    monkeypatch.setattr(data_manager, "DataManager", data_class)
+    monkeypatch.setattr(web_app, "SafeReportWebApp", web_class)
+
+    flask_app = web_app.create_app()
+
+    ai_class.assert_called_once_with()
+    logic_class.assert_called_once_with()
+    data_class.assert_called_once_with()
+    web_class.assert_called_once()
+
+    arguments = web_class.call_args.kwargs
+    assert arguments["ai_manager"] is ai
+    assert arguments["logic_manager"] is logic
+    assert arguments["data_manager"] is data
+    assert flask_app is web_class.return_value.flask_app
+
+@pytest.mark.parametrize(
+    "method, path, status, expected_code",
+    [
+        ("GET", "/admin", "READY_FOR_REVIEW", 302),
+        ("GET", "/reports/OTHER-001", "READY_FOR_REVIEW", 302),
+        ("POST", "/reports/OTHER-001/retry", "AI_FAILED", 302),
+        ("POST", "/reports/OTHER-001/clarify", "NEEDS_CLARIFICATION", 302),
+        ("GET", "/reports/OTHER-001/photos/1", "READY_FOR_REVIEW", 404),
+    ],
+)
+def test_denied_requests_do_not_reach_managers(
+    make_client, method, path, status, expected_code
+):
+    from unittest.mock import Mock
+
+    ai = FakeAI()
+    codes = ["CLARIFY_LOCATION"] if status == "NEEDS_CLARIFICATION" else []
+    data = FakeData([
+        make_report("OWN-001", "READY_FOR_REVIEW"),
+        make_report("OTHER-001", status, codes=codes),
+    ])
+    client = make_client(ai=ai, data=data, admin=False)
+
+    with client.session_transaction() as session:
+        session["my_reports"] = ["OWN-001"]
+
+    data.load_reports = Mock(wraps=data.load_reports)
+    data.save_report = Mock(wraps=data.save_report)
+    data.save_clarifications = Mock(wraps=data.save_clarifications)
+    ai.ensure_ready = Mock(wraps=ai.ensure_ready)
+
+    if method == "POST":
+        response = client.post(path, data={"workplace_location": "Block B"})
+    else:
+        response = client.get(path)
+
+    assert response.status_code == expected_code
+    if expected_code == 302:
+        assert response.headers["Location"].endswith("/admin/login")
+
+    data.load_reports.assert_not_called()
+    data.save_report.assert_not_called()
+    data.save_clarifications.assert_not_called()
+    ai.ensure_ready.assert_not_called()
+    assert ai.calls == []
+
+def test_login_logout_and_load_failure_recovery(make_client):
+    data = FakeData([make_report("SESSION-001", "READY_FOR_REVIEW")])
+    client = make_client(data=data, admin=False, csrf=True)
+
+    client.get("/admin/login")
+    with client.session_transaction() as session:
+        token = session["csrf_token"]
+
+    rejected = client.post("/admin/login", data={
+        "username": ADMIN_USERNAME,
+        "password": "wrong-password",
+        "csrf_token": token,
+    })
+    assert rejected.status_code == 401
+    assert client.get("/admin").status_code == 302
+
+    with client.session_transaction() as session:
+        token = session["csrf_token"]
+
+    signed_in = client.post("/admin/login", data={
+        "username": ADMIN_USERNAME,
+        "password": ADMIN_PASSWORD,
+        "csrf_token": token,
+    }, follow_redirects=True)
+    assert signed_in.status_code == 200
+    assert signed_in.request.path == "/admin"
+    assert "SESSION-001" in signed_in.get_data(as_text=True)
+
+    data.load_fails = True
+    unavailable = client.get("/admin")
+    assert unavailable.status_code == 200
+    assert "Saved reports could not be loaded." in unavailable.get_data(as_text=True)
+    assert "SESSION-001" not in unavailable.get_data(as_text=True)
+
+    data.load_fails = False
+    recovered = client.get("/admin")
+    assert recovered.status_code == 200
+    assert "SESSION-001" in recovered.get_data(as_text=True)
+    assert "Saved reports could not be loaded." not in recovered.get_data(as_text=True)
+
+    with client.session_transaction() as session:
+        assert session.get("is_admin") is True
+        token = session["csrf_token"]
+
+    signed_out = client.post(
+        "/admin/logout",
+        data={"csrf_token": token},
+        follow_redirects=True,
+    )
+    assert signed_out.status_code == 200
+    assert signed_out.request.path == "/"
+    assert client.get("/admin").status_code == 302
+    assert client.get("/reports/SESSION-001").status_code == 302

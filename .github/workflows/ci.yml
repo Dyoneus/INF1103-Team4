@@ -32,5 +32,18 @@ jobs:
           python -m pytest tests test_script.py -q
 
       - name: Build Docker image
+        run: docker compose build web
+
+      - name: Run automated tests in Docker image
+        run: >
+          docker run --rm
+          -e SAFEREPORT_DATABASE_PATH=/tmp/safereport-ci.db
+          safereport:local
+          python -m pytest tests test_script.py -q
+
+      - name: Verify web container health
         run: |
-          docker build -t safereport:ci .
+          trap 'docker compose down --remove-orphans' EXIT
+          SAFEREPORT_DATABASE_PATH=/tmp/safereport-ci.db \
+            docker compose up --detach --wait --wait-timeout 60 web
+          docker compose ps

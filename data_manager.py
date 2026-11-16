@@ -2,8 +2,9 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from report_store import save_report as save_raw_report
+from report_store import ReportStorage
 from database_manager import DatabaseManager
+import logging
 
 REPORTS_DIR = Path("reports")
 
@@ -13,7 +14,14 @@ class DataManager:
             database = DatabaseManager()
 
         self.database = database
+        self.storage = ReportStorage()
         self.database_ready = self.database.initialize_database()
+
+        # Import legacy JSON reports once at startup
+        self.legacy_import_ok = self.migrate_reports()
+
+        if self.database_ready and not self.legacy_import_ok:
+            logging.warning("Some legacy JSON reports could not be imported.")
 
     def migrate_reports(self):
         if not self.database_ready:
@@ -63,11 +71,12 @@ class DataManager:
             return False
     
     def load_reports(self):
-           # Import legacy JSON reports before reading SQLite."""
-            if not self.migrate_reports():
-                return None
+        # Read directly from SQLite. Legacy JSON reports are imported
+        # once at startup by migrate_reports().
+        if not self.database_ready:
+            return None
 
-            return self.database.load_reports()
+        return self.database.load_reports()
 
     def filter_by_status(self, status):
         reports = self.load_reports()
@@ -97,7 +106,7 @@ class DataManager:
             raise OSError("SQLite database is not ready.")
 
         try:
-            report_path = save_raw_report(report)
+            report_path = self.storage.save_report(report)
 
             if not report_path:
                 raise OSError("No report path was returned.")
@@ -177,7 +186,6 @@ class DataManager:
             report.update(updated_data)
 
             if not self.database_ready:
-                print("SQLite database is not ready.")
                 return False
 
             # Keep the original SQLite report for recovery.
@@ -197,15 +205,14 @@ class DataManager:
                 return False
 
             if not self.database.update_report(reference_id, report):
-                print("Failed to update report in SQLite.")
                 return False
 
             if not self._write_report(report_path, report):
-                print("Failed to update report in JSON.")
+                # print("Failed to update report in JSON.")
 
                 # Restore the previous SQLite report.
                 if not self.database.replace_report(reference_id, original_report):
-                    print("Warning: SQLite rollback failed.")
+                    logging.error("SQLite rollback failed.")
 
                 return False
 
@@ -269,13 +276,3 @@ class DataManager:
         """Save corrected details and invalidate the old assessment."""
         return self.update_report(reference_id, {}, case_changes=changes)
 
-
-manager = DataManager()
-
-create_report = manager.create_report
-load_reports = manager.load_reports
-update_report = manager.update_report
-save_report = manager.save_report
-save_clarifications = manager.save_clarifications
-filter_by_status = manager.filter_by_status
-get_failed_ai_reports = manager.get_failed_ai_reports
