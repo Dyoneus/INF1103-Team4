@@ -4,6 +4,7 @@ import tempfile
 from pathlib import Path
 from report_store import ReportStorage
 from database_manager import DatabaseManager
+import logging
 
 REPORTS_DIR = Path("reports")
 
@@ -20,7 +21,7 @@ class DataManager:
         self.legacy_import_ok = self.migrate_reports()
 
         if self.database_ready and not self.legacy_import_ok:
-            print("Warning: some legacy JSON reports could not be imported.")
+            logging.warning("Some legacy JSON reports could not be imported.")
 
     def migrate_reports(self):
         if not self.database_ready:
@@ -185,7 +186,6 @@ class DataManager:
             report.update(updated_data)
 
             if not self.database_ready:
-                print("SQLite database is not ready.")
                 return False
 
             # Keep the original SQLite report for recovery.
@@ -205,15 +205,14 @@ class DataManager:
                 return False
 
             if not self.database.update_report(reference_id, report):
-                print("Failed to update report in SQLite.")
                 return False
 
             if not self._write_report(report_path, report):
-                print("Failed to update report in JSON.")
+                # print("Failed to update report in JSON.")
 
                 # Restore the previous SQLite report.
                 if not self.database.replace_report(reference_id, original_report):
-                    print("Warning: SQLite rollback failed.")
+                    logging.error("SQLite rollback failed.")
 
                 return False
 
