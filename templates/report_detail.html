@@ -90,6 +90,9 @@
           <dt>Date quality</dt><dd>{{ report.ai_result.get('date_quality', '') }}</dd>
           <dt>Time quality</dt><dd>{{ report.ai_result.get('time_quality', '') }}</dd>
           <dt>Safety category</dt><dd>{{ report.ai_result.get('safety_category', '') }}</dd>
+          {% if report.ai_result.get('photo_match') %}
+            <dt>Photo match</dt><dd>{{ report.ai_result.get('photo_match') }}</dd>
+          {% endif %}
         </dl>
       {% else %}
         <p class="empty">No AI result yet.</p>

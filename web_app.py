@@ -289,7 +289,7 @@ class WebReportForm:
 
     # Which case field each clarification code asks the user to correct.
     _CLARIFICATION_FIELDS = (
-        (("CLARIFY_OBSERVATION",), "description", "Description"),
+        (("CLARIFY_OBSERVATION", "CLARIFY_PHOTO"), "description", "Description"),
         (("ADD_LOCATION", "CLARIFY_LOCATION"), "workplace_location", "Workplace location"),
         (("ADD_DATE", "ADD_TIME"), "incident_datetime", "Date and time of incident"),
     )

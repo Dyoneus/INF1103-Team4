@@ -21,6 +21,11 @@ class LogicManager:
             ]
         }
 
+        # Optional fields: only present when photos were sent to the AI
+        self.__optional_values = {
+            "photo_match": ["MATCHED", "UNMATCHED"]
+        }
+
     # Check whether one AI result is valid
     def validate_ai_output(self, ai_output):
         if not isinstance(ai_output, dict):
@@ -37,6 +42,13 @@ class LogicManager:
                 return False
 
             if value not in allowed_values:
+                return False
+
+        for field, allowed_values in self.__optional_values.items():
+            if field not in ai_output:
+                continue
+
+            if ai_output[field] not in allowed_values:
                 return False
 
         return True
@@ -66,6 +78,7 @@ class LogicManager:
             ai_output["location_quality"] == "VAGUE"
             or ai_output["date_quality"] == "MISSING"
             or ai_output["time_quality"] == "MISSING"
+            or ai_output.get("photo_match") == "UNMATCHED"
         ):
             return True
 
@@ -88,6 +101,7 @@ class LogicManager:
             and ai_output["location_quality"] == "ADEQUATE"
             and ai_output["date_quality"] in ["EXACT", "APPROXIMATE"]
             and ai_output["time_quality"] in ["EXACT", "APPROXIMATE"]
+            and ai_output.get("photo_match") != "UNMATCHED"
         ):
             return True
 
@@ -107,6 +121,10 @@ class LogicManager:
 
         if ai_output["issue_clarity"] == "UNCLEAR":
             clarification_codes.append("CLARIFY_OBSERVATION")
+
+        # The attached photo does not show what the description says
+        if ai_output.get("photo_match") == "UNMATCHED":
+            clarification_codes.append("CLARIFY_PHOTO")
 
         if ai_output["location_quality"] == "MISSING":
             clarification_codes.append("ADD_LOCATION")

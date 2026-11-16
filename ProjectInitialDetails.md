@@ -102,7 +102,8 @@ The Logic Manager applies rules to the AI-generated fields and determines the fi
 **Condition:**
 
 - The issue is clear, but the location is vague, **OR**
-- Date/time information is missing
+- Date/time information is missing, **OR**
+- An attached photo does not match the description (`photo_match` is `UNMATCHED`; the reporter is asked to check the description, code `CLARIFY_PHOTO`)
 
 **Outcome:**
 
@@ -116,7 +117,8 @@ The Logic Manager applies rules to the AI-generated fields and determines the fi
 
 - The issue is clear, **AND**
 - The location is adequate, **AND**
-- Usable date and time information are present
+- Usable date and time information are present, **AND**
+- Any attached photo that was analysed matches the description
 
 **Outcome:**
 
