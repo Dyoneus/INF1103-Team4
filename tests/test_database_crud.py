@@ -129,3 +129,12 @@ def test_load_reports_with_corrupted_record(tmp_path):
 
     # A corrupted record should not prevent valid reports from loading.
     assert database.load_reports() == [valid_report]
+
+def test_corrupted_database_file(tmp_path):
+    database_path = tmp_path / "corrupted.db"
+
+    database_path.write_bytes(b"This is not a SQLite database")
+
+    database = DatabaseManager(database_path)
+
+    assert database.initialize_database() is False
