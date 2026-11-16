@@ -118,15 +118,6 @@ NOT_ASSESSED_ERRORS = frozenset({
 })
 
 
-def _default_input(prompt: str) -> str:
-    # Looked up at call time so tests that monkeypatch builtins.input still work.
-    return input(prompt)
-
-
-def _default_output(text: str = "") -> None:
-    print(text)
-
-
 class ConsolePrompter:
     """Reads terminal input and re-prompts until it is valid.
 
@@ -141,8 +132,13 @@ class ConsolePrompter:
         output_fn: OutputFn | None = None,
     ):
         self._error_messages = error_messages
-        self._input = input_fn or _default_input
-        self._output = output_fn or _default_output
+        self._input = input_fn or self._read_line
+        self._output = output_fn or print
+
+    @staticmethod
+    def _read_line(prompt: str) -> str:
+        # Looked up at call time so tests that monkeypatch builtins.input still work.
+        return input(prompt)
 
     def show(self, text: str = "") -> None:
         self._output(text)
@@ -198,7 +194,7 @@ class ReportView:
     """Displays menus, reports, assessment results and errors. Never reads input."""
 
     def __init__(self, output_fn: OutputFn | None = None):
-        self._output = output_fn or _default_output
+        self._output = output_fn or print
 
     def _show(self, text: str = "") -> None:
         self._output(text)
@@ -570,24 +566,3 @@ class IOManager:
     def display_analysis_error(self, message: str) -> None:
         self._view.display_analysis_error(message)
 
-
-# Transitional module-level names.
-# main.py and ai_manager.py still call io_manager.<name>(...), and their tests
-# monkeypatch these names. Each one is just a bound method of one shared
-# IOManager, so all behaviour lives in the classes above. Delete this block once
-# main.py and ai_manager.py create and hold their own IOManager instance.
-_default_io = IOManager()
-
-display_menu = _default_io.display_menu
-get_menu_choice = _default_io.get_menu_choice
-select_saved_report = _default_io.select_saved_report
-collect_report = _default_io.collect_report
-review_report_before_submission = _default_io.review_report_before_submission
-collect_clarifications = _default_io.collect_clarifications
-display_report_reference = _default_io.display_report_reference
-display_assessment_result = _default_io.display_assessment_result
-display_clarification_questions = _default_io.display_clarification_questions
-display_processing_error = _default_io.display_processing_error
-display_report_analysis_started = _default_io.display_report_analysis_started
-display_analysis_summary = _default_io.display_analysis_summary
-display_analysis_error = _default_io.display_analysis_error
