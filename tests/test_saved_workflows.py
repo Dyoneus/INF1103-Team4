@@ -187,14 +187,14 @@ def test_failed_correction_save_keeps_original_and_skips_ai(tmp_path, monkeypatc
 def test_clarification_validates_and_collects_datetime_once(monkeypatch):
     report = {"case_details": {}, "assessment": {"clarification_codes": ["ADD_DATE", "ADD_TIME"]}}
     answer_with(monkeypatch, ["bad date", "2020-01-02 09:30"])
-    assert io_manager.collect_clarifications(report) == {"incident_datetime": "2020-01-02T09:30"}
+    assert io_manager.IOManager().collect_clarifications(report) == {"incident_datetime": "2020-01-02T09:30"}
 
 
 @pytest.mark.parametrize("choice", ["0", "TEST-001"])
 def test_select_report_by_reference_or_cancel(monkeypatch, choice):
     report = {"reference_id": "TEST-001"}
     answer_with(monkeypatch, ["invalid", choice])
-    assert io_manager.select_saved_report([report]) == (None if choice == "0" else report)
+    assert io_manager.IOManager().select_saved_report([report]) == (None if choice == "0" else report)
 
 
 def test_corrections_cannot_change_protected_fields(tmp_path, monkeypatch, isolated_database):

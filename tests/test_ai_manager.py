@@ -12,6 +12,13 @@ import ai_manager
 import groq
 import httpx
 import logic_manager
+from ai_manager import (
+    AIConfig,
+    AIManager,
+    GroqProvider,
+    ReportBatchAnalyzer,
+    ResponseValidator,
+)
 
 
 VALID_FIELDS = {
@@ -21,6 +28,11 @@ VALID_FIELDS = {
     "time_quality": "EXACT",
     "safety_category": "FIRE",
 }
+
+
+def manager_for(client):
+    """An AIManager whose only provider is Groq talking to a fake SDK client."""
+    return AIManager(provider=GroqProvider(client=client))
 
 
 def assert_raises(expected_exception, function, *args, message=None):
@@ -41,7 +53,7 @@ def assert_raises(expected_exception, function, *args, message=None):
 def test_validate_response_returns_only_normalized_fields():
     response = {**VALID_FIELDS, "issue_clarity": " clear "}
 
-    assert ai_manager.validate_response(json.dumps(response)) == VALID_FIELDS
+    assert ResponseValidator().validate(json.dumps(response)) == VALID_FIELDS
 
 
 def test_validate_response_rejects_invalid_output():
@@ -60,7 +72,7 @@ def test_validate_response_rejects_invalid_output():
     for response in invalid_responses:
         assert_raises(
             ValueError,
-            ai_manager.validate_response,
+            ResponseValidator().validate,
             json.dumps(response),
         )
 
@@ -75,7 +87,7 @@ def test_clear_hazard_without_keywords_reaches_logic_unchanged():
 
     with patch.object(client.chat.completions, "create", create=True,
                       return_value=response) as create:
-        result = ai_manager.analyze_incident(client, {
+        result = manager_for(client).analyze_incident({
             "description": "The staircase has no handrail on either side.",
             "workplace_location": "Block 30, staircase B, third floor",
             "incident_datetime": "2026-10-13T15:00",
@@ -84,7 +96,7 @@ def test_clear_hazard_without_keywords_reaches_logic_unchanged():
     create.assert_called_once()
     assert result == fields
     assessment = logic.determine_report_status(
-        ai_manager.make_result("report-1", fields=result)
+        AIManager().make_result("report-1", fields=result)
     )
     assert assessment == {
         "status": "READY_FOR_REVIEW", "clarification_codes": []
@@ -103,12 +115,12 @@ def test_ai_identified_non_safety_observation_is_incomplete_in_logic():
 
     with patch.object(client.chat.completions, "create", create=True,
                       return_value=response) as create:
-        result = ai_manager.analyze_incident(client, {"description": "The sun."})
+        result = manager_for(client).analyze_incident({"description": "The sun."})
 
     create.assert_called_once()
     assert result == fields
     assessment = logic.determine_report_status(
-        ai_manager.make_result("report-2", fields=result)
+        AIManager().make_result("report-2", fields=result)
     )
     assert assessment == {
         "status": "INCOMPLETE", "clarification_codes": ["CLARIFY_OBSERVATION"]
@@ -118,7 +130,7 @@ def test_ai_identified_non_safety_observation_is_incomplete_in_logic():
 def test_validate_response_rejects_non_string_input():
     assert_raises(
         ValueError,
-        ai_manager.validate_response,
+        ResponseValidator().validate,
         None,
         message="must be a string",
     )
@@ -126,7 +138,7 @@ def test_validate_response_rejects_non_string_input():
 
 def test_success_result_is_accepted_by_logic_manager():
     logic = logic_manager.LogicManager()
-    result = ai_manager.make_result("report-1", fields=VALID_FIELDS)
+    result = AIManager().make_result("report-1", fields=VALID_FIELDS)
 
     assert result["status"] == "success"
     assert logic.validate_ai_output(result)
@@ -138,7 +150,7 @@ def test_success_result_is_accepted_by_logic_manager():
 
 def test_error_result_is_rejected_by_logic_manager():
     logic = logic_manager.LogicManager()
-    result = ai_manager.make_result(
+    result = AIManager().make_result(
         "report-1",
         error=RuntimeError("offline"),
     )
@@ -161,14 +173,13 @@ def test_process_report_returns_consistent_result_if_client_setup_fails():
             encoding="utf-8",
         )
 
-        result = ai_manager.process_report(
-            None,
+        result = ReportBatchAnalyzer(ai=AIManager()).process_report(
             report_path,
             Path(temp_dir),
             RuntimeError("API key is missing"),
         )
 
-    assert result == ai_manager.make_result(
+    assert result == AIManager().make_result(
         "report-1",
         error=RuntimeError("API key is missing"),
     )
@@ -181,7 +192,7 @@ def test_ai_output_path_can_be_configured_for_persistent_storage():
         ai_manager.os.environ,
         {"AI_OUTPUT_PATH": "/data/ai_output.json"},
     ):
-        output_path = ai_manager.get_output_path(project_dir)
+        output_path = ReportBatchAnalyzer.get_output_path(project_dir)
 
     assert output_path == Path("/data/ai_output.json")
 
@@ -189,7 +200,7 @@ def test_ai_output_path_can_be_configured_for_persistent_storage():
 def test_ai_output_path_defaults_to_project_directory():
     with patch.dict(ai_manager.os.environ):
         ai_manager.os.environ.pop("AI_OUTPUT_PATH", None)
-        output_path = ai_manager.get_output_path(Path("project"))
+        output_path = ReportBatchAnalyzer.get_output_path(Path("project"))
 
     assert output_path == Path("project") / "ai_output.json"
 
@@ -211,13 +222,12 @@ def test_analyze_incident_stops_after_max_attempts():
     with patch.object(ai_manager.time, "sleep"):
         assert_raises(
             RuntimeError,
-            ai_manager.analyze_incident,
-            client,
+            manager_for(client).analyze_incident,
             {},
             message="failed after",
         )
 
-    assert calls["count"] == ai_manager.MAX_ATTEMPTS
+    assert calls["count"] == AIConfig().max_attempts
 
 
 def test_analyze_incident_retries_connection_failure():
@@ -244,7 +254,7 @@ def test_analyze_incident_retries_connection_failure():
     )
 
     with patch.object(ai_manager.time, "sleep"):
-        result = ai_manager.analyze_incident(client, {})
+        result = manager_for(client).analyze_incident({})
 
     assert result == VALID_FIELDS
     assert calls["count"] == 3
@@ -274,8 +284,7 @@ def test_analyze_incident_does_not_retry_non_retryable_api_error():
 
     assert_raises(
         RuntimeError,
-        ai_manager.analyze_incident,
-        client,
+        manager_for(client).analyze_incident,
         {},
         message="HTTP 401",
     )
