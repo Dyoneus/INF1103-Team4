@@ -149,3 +149,17 @@ input[type=text], input[type=password], input[type=email], input[type=tel], inpu
   dl { grid-template-columns: minmax(0, 1fr); gap: 0.1rem 0; }
   dd { margin-bottom: 0.6rem; }
 }
+
+/* Running list of chosen photos on the report form. */
+.photo-list { list-style: none; margin: 0.5rem 0 0; padding: 0; }
+.photo-list li {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;
+  padding: 0.35rem 0.6rem; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--card); margin-bottom: 0.35rem; font-size: 0.92rem;
+}
+.photo-list .photo-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.photo-list button {
+  border: 0; background: none; color: var(--bad); font: inherit; font-weight: 600;
+  cursor: pointer; padding: 0.1rem 0.25rem;
+}
+.photo-list button:hover { text-decoration: underline; }

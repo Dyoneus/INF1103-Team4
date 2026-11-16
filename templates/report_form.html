@@ -21,8 +21,11 @@
     <div class="field">
       <label for="photos">Photos (optional)</label>
       <input id="photos" name="photos" type="file" accept="{{ photo_types }}" multiple
+             data-max-photos="{{ max_photos }}"
              {% if errors.get('photos') %}aria-invalid="true" aria-describedby="photos-error"{% endif %}>
-      <p class="hint">Up to {{ max_photos }} photos: .jpg, .jpeg or .png.</p>
+      <p class="hint">Up to {{ max_photos }} photos: .jpg, .jpeg or .png. You can choose them one at a time.</p>
+      <ul class="photo-list" id="photo-list" aria-live="polite" hidden></ul>
+      <p class="field-error" id="photo-limit" role="alert" hidden></p>
       {{ field.error(errors, 'photos') }}
     </div>
 
