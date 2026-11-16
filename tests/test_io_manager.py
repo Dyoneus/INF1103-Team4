@@ -151,6 +151,18 @@ def test_clarified_description_reprompts_for_blank_input(make_io):
     assert console.text.count("Description cannot be empty.") == 2
 
 
+def test_unmatched_photo_asks_for_the_description_once(make_io):
+    io, console = make_io(["Exposed cable sparking beside the loading bay door."])
+    report = {**sample_report(),
+              "assessment": {"clarification_codes": ["CLARIFY_OBSERVATION", "CLARIFY_PHOTO"]}}
+
+    changes = io.collect_clarifications(report)
+
+    assert changes == {"description": "Exposed cable sparking beside the loading bay door."}
+    assert "photo does not seem to show what you described" in console.text
+    assert console.remaining == []
+
+
 def test_cancelling_clarification_returns_none_and_does_not_change_report(make_io):
     io, console = make_io(["Block 30", KeyboardInterrupt()])
     report = {**sample_report(), "assessment": {"clarification_codes": ["ADD_LOCATION", "ADD_DATE"]}}

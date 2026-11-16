@@ -86,6 +86,8 @@ ERROR_MESSAGES = {
 # Questions for the clarification codes returned by the Logic Manager.
 CLARIFICATION_QUESTIONS = {
     "CLARIFY_OBSERVATION": "Please describe what you observed in more detail.",
+    "CLARIFY_PHOTO": ("Your photo does not seem to show what you described. "
+                      "Please check your description and include what the photo shows."),
     "ADD_LOCATION": "Where did you observe this?",
     "CLARIFY_LOCATION": "Can you provide a more specific location?",
     "ADD_DATE": "What date did this happen?",
@@ -311,7 +313,7 @@ class ReportForm:
 
         # To support a new clarification code, add a row here.
         self._clarification_steps = (
-            _ClarificationStep(("CLARIFY_OBSERVATION",), "description", "description",
+            _ClarificationStep(("CLARIFY_OBSERVATION", "CLARIFY_PHOTO"), "description", "description",
                                self._ask_description),
             _ClarificationStep(("ADD_LOCATION", "CLARIFY_LOCATION"), "workplace_location", "location",
                                self._ask_updated_location),

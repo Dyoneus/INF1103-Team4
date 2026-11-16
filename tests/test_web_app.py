@@ -65,6 +65,9 @@ class FakeAI:
         result = {"reference_id": reference_id, "status": "error" if error else "success"}
         for field in READY_FIELDS:
             result[field] = fields[field] if fields and not error else None
+        # Like the real AI Manager, photo_match is only present when a photo was analysed.
+        if fields and not error and "photo_match" in fields:
+            result["photo_match"] = fields["photo_match"]
         result["error"] = str(error) if error else None
         return result
 
@@ -640,6 +643,38 @@ def test_form_maps_clarification_codes_to_fields():
     fields = WebReportForm().clarification_fields(["ADD_TIME", "CLARIFY_OBSERVATION", "ADD_DATE"])
 
     assert [field["name"] for field in fields] == ["description", "incident_datetime"]
+
+
+def test_unmatched_photo_asks_for_the_description():
+    fields = WebReportForm().clarification_fields(["CLARIFY_PHOTO"])
+
+    assert [field["name"] for field in fields] == ["description"]
+
+
+def test_unmatched_photo_is_assessed_shown_and_asked_about(make_client):
+    ai = FakeAI({**READY_FIELDS, "photo_match": "UNMATCHED"})
+    report = make_report("R-1", photos=["reports/photos/R-1/photo_1.jpg"],
+                         consent_for_image_use=True)
+    data = FakeData([report])
+    client = make_client(ai, data)
+
+    client.post("/reports/R-1/retry")
+    page = client.get("/reports/R-1").get_data(as_text=True)
+
+    assert data.reports["R-1"]["assessment"] == {
+        "status": "NEEDS_CLARIFICATION", "clarification_codes": ["CLARIFY_PHOTO"]}
+    assert "<dt>Photo match</dt><dd>UNMATCHED</dd>" in page
+    assert "photo does not seem to show what you described" in page
+    assert 'name="description"' in page
+
+
+def test_photo_match_is_hidden_when_no_photo_was_assessed(make_client):
+    data = FakeData([make_report("R-1", "READY_FOR_REVIEW")])
+    data.reports["R-1"]["ai_result"] = {"status": "success", **READY_FIELDS, "error": None}
+
+    page = make_client(data=data).get("/reports/R-1").get_data(as_text=True)
+
+    assert "Safety category" in page and "Photo match" not in page
 
 
 def test_uploads_are_removed_even_if_the_request_fails():

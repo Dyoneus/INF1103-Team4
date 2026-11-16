@@ -116,3 +116,54 @@ def test_multiple_missing_fields():
         "ADD_LOCATION",
         "ADD_TIME"
     ]
+
+
+# rule 9: Photo does not match the description
+def test_unmatched_photo_needs_clarification():
+    ai_output = sample_ai_output()
+    ai_output["photo_match"] = "UNMATCHED"
+
+    logic = LogicManager()
+    result = logic.determine_report_status(ai_output)
+
+    assert result["status"] == "NEEDS_CLARIFICATION"
+    assert result["clarification_codes"] == ["CLARIFY_PHOTO"]
+
+
+# rule 10: Photo matches the description
+def test_matched_photo_is_ready_for_review():
+    ai_output = sample_ai_output()
+    ai_output["photo_match"] = "MATCHED"
+
+    logic = LogicManager()
+    result = logic.determine_report_status(ai_output)
+
+    assert result["status"] == "READY_FOR_REVIEW"
+    assert result["clarification_codes"] == []
+
+
+# rule 11: INCOMPLETE still takes priority over an unmatched photo
+def test_unmatched_photo_with_unclear_issue_is_incomplete():
+    ai_output = sample_ai_output()
+    ai_output["issue_clarity"] = "UNCLEAR"
+    ai_output["photo_match"] = "UNMATCHED"
+
+    logic = LogicManager()
+    result = logic.determine_report_status(ai_output)
+
+    assert result["status"] == "INCOMPLETE"
+    assert result["clarification_codes"] == [
+        "CLARIFY_OBSERVATION",
+        "CLARIFY_PHOTO"
+    ]
+
+
+# rule 12: photo_match is optional, but must be valid when present
+def test_invalid_photo_match_is_ai_failed():
+    ai_output = sample_ai_output()
+    ai_output["photo_match"] = "MAYBE"
+
+    logic = LogicManager()
+    result = logic.determine_report_status(ai_output)
+
+    assert result["status"] == "AI_FAILED"
