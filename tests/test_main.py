@@ -1,11 +1,24 @@
 
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 import main
 
+@pytest.fixture
+def application():
+    io = Mock(spec=main.io_manager.IOManager)
+    io.review_report_before_submission.side_effect = lambda report: report
+    data = Mock(spec=main.data_manager.DataManager)
 
-def test_report_needs_clarification(monkeypatch):
+    return main.SafeReportApplication(
+        io,
+        main.ai_manager.AIManager(),
+        main.logic_manager.LogicManager(),
+        data,
+    )
+
+def test_report_needs_clarification(monkeypatch, application):
 
     #simulate a report collected by I/O Manager
     report = {
@@ -33,11 +46,11 @@ def test_report_needs_clarification(monkeypatch):
 
     #replace user input and raw saving
     monkeypatch.setattr(
-        main.io_manager, "collect_report", lambda: report
+        application._io, "collect_report", lambda: report
     )
 
     monkeypatch.setattr(
-        main.data_manager, "create_report",
+        application._data, "create_report",
         lambda report: Path("reports/TEST-001.json")
     )
 
@@ -63,24 +76,24 @@ def test_report_needs_clarification(monkeypatch):
         return True
 
     monkeypatch.setattr(
-        main.data_manager, "save_report", fake_save
+        application._data, "save_report", fake_save
     )
 
     #prevent terminal output and capture results
     monkeypatch.setattr(
-        main.io_manager, "display_report_reference",
+        application._io, "display_report_reference",
         lambda reference_id: None
     )
 
     monkeypatch.setattr(
-        main.io_manager, "display_assessment_result",
+        application._io, "display_assessment_result",
         lambda assessment: displayed.update(
             {"assessment": assessment}
         )
     )
 
     monkeypatch.setattr(
-        main.io_manager, "display_clarification_questions",
+        application._io, "display_clarification_questions",
         lambda codes: displayed.update({"codes": codes})
     )
 
@@ -89,13 +102,13 @@ def test_report_needs_clarification(monkeypatch):
         return None
 
     monkeypatch.setattr(
-        main.io_manager,
+        application._io,
         "collect_clarifications",
         fake_collect_clarifications
     )
 
     #run the workflow
-    main.process_new_report()
+    application.process_new_report()
 
     #verify the expected result
     assert saved["reference_id"] == "TEST-001"
@@ -126,8 +139,10 @@ def test_report_needs_clarification(monkeypatch):
         )
     ]
 )
+
 def test_other_readiness_statuses(
     monkeypatch,
+    application,
     issue_clarity,
     location_quality,
     expected_status,
@@ -154,29 +169,29 @@ def test_other_readiness_statuses(
 
     # Simulate I/O Manager
     monkeypatch.setattr(
-        main.io_manager, "collect_report", lambda: report
+        application._io, "collect_report", lambda: report
     )
 
     monkeypatch.setattr(
-        main.io_manager,
+        application._io,
         "review_report_before_submission",
         lambda report: report
     )
 
     monkeypatch.setattr(
-        main.io_manager, "display_report_reference",
+        application._io, "display_report_reference",
         lambda reference_id: None
     )
 
     monkeypatch.setattr(
-        main.io_manager, "display_assessment_result",
+        application._io, "display_assessment_result",
         lambda assessment: displayed.update(
             {"assessment": assessment}
         )
     )
 
     monkeypatch.setattr(
-        main.io_manager, "display_clarification_questions",
+        application._io, "display_clarification_questions",
         lambda codes: displayed.update({"codes": codes})
     )
     def fake_collect_clarifications(report_data):
@@ -184,14 +199,14 @@ def test_other_readiness_statuses(
         return None
 
     monkeypatch.setattr(
-        main.io_manager,
+        application._io,
         "collect_clarifications",
         fake_collect_clarifications
     )
 
     # Simulate original report saving
     monkeypatch.setattr(
-        main.data_manager, "create_report",
+        application._data, "create_report",
         lambda report: Path("reports/TEST-002.json")
     )
 
@@ -212,11 +227,11 @@ def test_other_readiness_statuses(
         return True
 
     monkeypatch.setattr(
-        main.data_manager, "save_report", fake_save
+        application._data, "save_report", fake_save
     )
 
     # Run the actual integration workflow
-    main.process_new_report()
+    application.process_new_report()
 
     # Verify results
     assert saved["reference_id"] == "TEST-002"
@@ -234,7 +249,7 @@ def test_other_readiness_statuses(
         assert "codes" not in displayed
 
 
-def test_clarification_loop_reassesses_report(monkeypatch):
+def test_clarification_loop_reassesses_report(monkeypatch, application):
     report = {
         "reference_id": "TEST-CASE",
         "case_details": {
@@ -269,9 +284,9 @@ def test_clarification_loop_reassesses_report(monkeypatch):
 
     monkeypatch.setattr(main.ai_manager.AIManager, "ensure_ready", lambda self: None)
     monkeypatch.setattr(main.ai_manager.AIManager, "analyze_incident", fake_analyze)
-    monkeypatch.setattr(main.data_manager, "save_report", lambda *args: True)
-    monkeypatch.setattr(main.data_manager, "save_clarifications", lambda *args: True)
-    monkeypatch.setattr(main.io_manager, "display_assessment_result", lambda assessment: None)
+    monkeypatch.setattr(application._data, "save_report", lambda *args: True)
+    monkeypatch.setattr(application._data, "save_clarifications", lambda *args: True)
+    monkeypatch.setattr(application._io, "display_assessment_result", lambda assessment: None)
 
     collected = {}
 
@@ -279,13 +294,13 @@ def test_clarification_loop_reassesses_report(monkeypatch):
         collected["codes"] = report_data["assessment"]["clarification_codes"]
         return {"workplace_location": "Block 30, level 3"}
 
-    monkeypatch.setattr(main.io_manager, "collect_clarifications", fake_collect_clarifications)
+    monkeypatch.setattr(application._io, "collect_clarifications", fake_collect_clarifications)
 
-    assessment = main.assess_report("TEST-CASE", report)
+    assessment = application.assess_report("TEST-CASE", report)
 
     assert assessment["status"] == "NEEDS_CLARIFICATION"
 
-    main.run_clarification_loop(
+    application.run_clarification_loop(
         "TEST-CASE",
         report,
         assessment
@@ -296,7 +311,7 @@ def test_clarification_loop_reassesses_report(monkeypatch):
     assert ai_calls["count"] == 2
 
 
-def test_save_failure(monkeypatch):
+def test_save_failure(monkeypatch, application):
     # Simulate a report
     report = {
         "case_details": {
@@ -319,17 +334,17 @@ def test_save_failure(monkeypatch):
     messages = []
 
     monkeypatch.setattr(
-        main.io_manager, "collect_report",
+        application._io, "collect_report",
         lambda: report
     )
 
     monkeypatch.setattr(
-        main.data_manager, "create_report",
+        application._data, "create_report",
         lambda report: Path("reports/TEST-003.json")
     )
 
     monkeypatch.setattr(
-        main.io_manager, "display_report_reference",
+        application._io, "display_report_reference",
         lambda reference_id: None
     )
 
@@ -346,35 +361,35 @@ def test_save_failure(monkeypatch):
 
     # Simulate Data Manager failing to save
     monkeypatch.setattr(
-        main.data_manager, "save_report",
+        application._data, "save_report",
         lambda reference_id, ai_result, assessment: False
     )
 
     # Capture error messages
     monkeypatch.setattr(
-        main.io_manager, "display_processing_error",
+        application._io, "display_processing_error",
         lambda code: messages.append(("error", code))
     )
 
     # Capture unexpected success displays
     monkeypatch.setattr(
-        main.io_manager, "display_assessment_result",
+        application._io, "display_assessment_result",
         lambda assessment: messages.append(("assessment", assessment))
     )
 
     monkeypatch.setattr(
-        main.io_manager, "display_clarification_questions",
+        application._io, "display_clarification_questions",
         lambda codes: messages.append(("questions", codes))
     )
 
     # run the workflow
-    main.process_new_report()
+    application.process_new_report()
 
     # only the save-failure error should be displayed
     assert messages == [("error", "SAVE_FAILED")]
 
 
-def test_raw_report_save_failure(monkeypatch):
+def test_raw_report_save_failure(monkeypatch, application):
     report = {
         "case_details": {
             "description": "Test safety observation.",
@@ -387,7 +402,7 @@ def test_raw_report_save_failure(monkeypatch):
 
     # simulate user input
     monkeypatch.setattr(
-        main.io_manager, "collect_report",
+        application._io, "collect_report",
         lambda: report
     )
 
@@ -396,13 +411,13 @@ def test_raw_report_save_failure(monkeypatch):
         raise OSError("Simulated file save failure")
 
     monkeypatch.setattr(
-        main.data_manager, "create_report",
+        application._data, "create_report",
         fake_create_report
     )
 
     # capture the error code
     monkeypatch.setattr(
-        main.io_manager, "display_processing_error",
+        application._io, "display_processing_error",
         lambda code: errors.append(code)
     )
 
@@ -416,13 +431,13 @@ def test_raw_report_save_failure(monkeypatch):
     )
 
     # run the workflow
-    main.process_new_report()
+    application.process_new_report()
 
     # verify the correct error was displayed
     assert errors == ["SAVE_FAILED"]
 
 
-def test_clarification_stops_at_attempt_limit(monkeypatch):
+def test_clarification_stops_at_attempt_limit(monkeypatch, application):
     report = {
         "reference_id": "TEST-001",
         "case_details": {
@@ -441,7 +456,7 @@ def test_clarification_stops_at_attempt_limit(monkeypatch):
 
     # simulate the user providing a correction each time
     monkeypatch.setattr(
-        main.io_manager,
+        application._io,
         "collect_clarifications",
         lambda report: {"workplace_location": "Block A"}
     )
@@ -452,7 +467,7 @@ def test_clarification_stops_at_attempt_limit(monkeypatch):
         return True
 
     monkeypatch.setattr(
-        main.data_manager,
+        application._data,
         "save_clarifications",
         fake_save
     )
@@ -469,12 +484,12 @@ def test_clarification_stops_at_attempt_limit(monkeypatch):
     )
 
     monkeypatch.setattr(
-        main.io_manager,
+        application._io,
         "display_clarification_questions",
         lambda codes: None
     )
 
-    main.run_clarification_loop(
+    application.run_clarification_loop(
         "TEST-001", report, assessment
     )
 

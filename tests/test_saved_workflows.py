@@ -1,4 +1,4 @@
-"""Procedural workflow tests using temporary records and mocked AI calls."""
+"""Application workflow tests using temporary records and mocked AI calls."""
 
 import json
 import subprocess
@@ -29,6 +29,15 @@ def isolated_database(tmp_path, monkeypatch):
     monkeypatch.setattr(data_manager.manager, "database", database)
     monkeypatch.setattr(data_manager.manager, "database_ready", True)
 
+@pytest.fixture
+def application(isolated_database):
+    return main.SafeReportApplication(
+        io_manager.IOManager(),
+        ai_manager.AIManager(),
+        main.logic_manager.LogicManager(),
+        data_manager.manager,
+    )
+
 def saved_report(tmp_path, monkeypatch, status, codes=None):
     monkeypatch.setattr(data_manager, "REPORTS_DIR", tmp_path)
     report = {
@@ -58,7 +67,7 @@ def successful_ai(monkeypatch):
     monkeypatch.setattr(ai_manager.AIManager, "analyze_incident", lambda *args: FIELDS)
 
 
-def test_retry_updates_original_record(tmp_path, monkeypatch):
+def test_retry_updates_original_record(tmp_path, monkeypatch, application):
     path, original = saved_report(tmp_path, monkeypatch, "AI_FAILED")
     answer_with(monkeypatch, ["TEST-001"])
     monkeypatch.setattr(ai_manager.AIManager, "ensure_ready", lambda self: None)
@@ -70,7 +79,7 @@ def test_retry_updates_original_record(tmp_path, monkeypatch):
         return FIELDS
 
     monkeypatch.setattr(ai_manager.AIManager, "analyze_incident", analyze)
-    main.retry_failed_report()
+    application.retry_failed_report()
     result = json.loads(path.read_text(encoding="utf-8"))
     assert result["assessment"]["status"] == "READY_FOR_REVIEW"
     assert result["ai_result"]["reference_id"] == original["reference_id"]
@@ -80,7 +89,7 @@ def test_retry_updates_original_record(tmp_path, monkeypatch):
     assert data_manager.manager.database.load_reports() == [result]
 
 
-def test_clarification_saves_before_ai_and_reassesses(tmp_path, monkeypatch):
+def test_clarification_saves_before_ai_and_reassesses(tmp_path, monkeypatch, application):
     path, original = saved_report(
         tmp_path, monkeypatch, "NEEDS_CLARIFICATION", ["CLARIFY_LOCATION"]
     )
@@ -96,7 +105,7 @@ def test_clarification_saves_before_ai_and_reassesses(tmp_path, monkeypatch):
         return FIELDS
 
     monkeypatch.setattr(ai_manager.AIManager, "analyze_incident", analyze)
-    main.clarify_report()
+    application.clarify_report()
     result = json.loads(path.read_text(encoding="utf-8"))
     assert result["assessment"] == {"status": "READY_FOR_REVIEW", "clarification_codes": []}
     assert result["reporter"] == original["reporter"]
@@ -105,7 +114,7 @@ def test_clarification_saves_before_ai_and_reassesses(tmp_path, monkeypatch):
     assert data_manager.manager.database.load_reports() == [result]
 
 
-def test_corrections_survive_ai_failure_and_can_be_retried(tmp_path, monkeypatch):
+def test_corrections_survive_ai_failure_and_can_be_retried(tmp_path, monkeypatch, application):
     path, _ = saved_report(tmp_path, monkeypatch, "INCOMPLETE", ["CLARIFY_OBSERVATION"])
     answer_with(monkeypatch, ["1", "Sparks are coming from an exposed cable."])
 
@@ -113,18 +122,18 @@ def test_corrections_survive_ai_failure_and_can_be_retried(tmp_path, monkeypatch
         raise RuntimeError("Missing API key")
 
     monkeypatch.setattr(ai_manager.AIManager, "ensure_ready", missing_client)
-    main.clarify_report()
+    application.clarify_report()
     result = json.loads(path.read_text(encoding="utf-8"))
     assert result["case_details"]["description"].startswith("Sparks")
     assert result["assessment"]["status"] == "AI_FAILED"
     assert data_manager.get_failed_ai_reports()[0]["reference_id"] == "TEST-001"
     successful_ai(monkeypatch)
     answer_with(monkeypatch, ["1"])
-    main.retry_failed_report()
+    application.retry_failed_report()
     assert json.loads(path.read_text(encoding="utf-8"))["assessment"]["status"] == "READY_FOR_REVIEW"
 
 
-def test_clarification_cancel_does_not_save_partial_answers(tmp_path, monkeypatch):
+def test_clarification_cancel_does_not_save_partial_answers(tmp_path, monkeypatch, application):
     path, _ = saved_report(tmp_path, monkeypatch, "INCOMPLETE", ["CLARIFY_OBSERVATION", "ADD_LOCATION"])
     before = path.read_bytes()
     responses = iter(["1", "A clearer description"])
@@ -136,11 +145,11 @@ def test_clarification_cancel_does_not_save_partial_answers(tmp_path, monkeypatc
         return value
 
     monkeypatch.setattr("builtins.input", interrupted_input)
-    main.clarify_report()
+    application.clarify_report()
     assert path.read_bytes() == before
 
 
-def test_failed_correction_save_keeps_original_and_skips_ai(tmp_path, monkeypatch):
+def test_failed_correction_save_keeps_original_and_skips_ai(tmp_path, monkeypatch, application):
     path, _ = saved_report(tmp_path, monkeypatch, "NEEDS_CLARIFICATION", ["CLARIFY_LOCATION"])
     before = path.read_bytes()
     answer_with(monkeypatch, ["1", "Block 30"])
@@ -153,7 +162,7 @@ def test_failed_correction_save_keeps_original_and_skips_ai(tmp_path, monkeypatc
 
     monkeypatch.setattr(data_manager.os, "replace", cannot_replace)
     monkeypatch.setattr(ai_manager.AIManager, "ensure_ready", unexpected_ai)
-    main.clarify_report()
+    application.clarify_report()
     assert path.read_bytes() == before
     assert not list(tmp_path.glob("*.tmp"))
 

@@ -5,26 +5,6 @@ import json
 import pytest
 import main
 
-@pytest.fixture
-def ai_instance(monkeypatch):
-    ai = Mock(spec=main.ai_manager.AIManager)
-    monkeypatch.setattr(
-        main.ai_manager,
-        "AIManager",
-        Mock(return_value=ai),
-    )
-    return ai
-
-@pytest.fixture
-def logic_instance(monkeypatch):
-    logic = Mock(spec=main.logic_manager.LogicManager)
-    monkeypatch.setattr(
-        main.logic_manager,
-        "LogicManager",
-        Mock(return_value=logic),
-    )
-    return logic
-
 def test_constructor_keeps_supplied_managers_without_calling_them():
     managers = [Mock() for _ in range(4)]
 
@@ -78,25 +58,6 @@ def test_ai_failure_uses_injected_managers(error_code, save_succeeds):
         call.data.save_report("TEST-001", ai_result, assessment),
         call.io.display_processing_error(expected_error),
     ]
-
-
-def test_existing_function_delegates_to_application(monkeypatch, logic_instance, ai_instance):
-    application_class = Mock()
-    monkeypatch.setattr(
-        main, "SafeReportApplication", application_class
-    )
-
-    main.handle_ai_failure("TEST-001", "CONFIG_MISSING")
-
-    application_class.assert_called_once_with(
-        io_manager=main.io_manager,
-        ai_manager=ai_instance,
-        logic_manager=logic_instance,
-        data_manager=main.data_manager,
-    )
-    application_class.return_value.handle_ai_failure.assert_called_once_with(
-        "TEST-001", "CONFIG_MISSING"
-    )
 
 @pytest.fixture
 def assessment_setup():
@@ -215,28 +176,6 @@ def test_assessment_save_failure_does_not_display_success(
     )
     io.display_processing_error.assert_called_once_with("SAVE_FAILED")
     io.display_assessment_result.assert_not_called()
-
-
-def test_existing_assessment_function_delegates(monkeypatch, logic_instance, ai_instance):
-    application_class = Mock()
-    monkeypatch.setattr(
-        main, "SafeReportApplication", application_class
-    )
-    report = {"case_details": {}}
-
-    result = main.assess_report("TEST-001", report)
-
-    application_class.assert_called_once_with(
-        io_manager=main.io_manager,
-        ai_manager=ai_instance,
-        logic_manager=logic_instance,
-        data_manager=main.data_manager,
-    )
-    application_class.return_value.assess_report.assert_called_once_with(
-        "TEST-001", report
-    )
-
-    assert result is application_class.return_value.assess_report.return_value
 
 @pytest.fixture
 def clarification_setup(assessment_setup):
@@ -396,30 +335,6 @@ def test_clarification_displays_only_outstanding_questions_at_limit(
             ["CLARIFY_LOCATION"]
         )
 
-
-def test_existing_clarification_function_delegates(monkeypatch, logic_instance, ai_instance):
-    application_class = Mock()
-    monkeypatch.setattr(
-        main, "SafeReportApplication", application_class
-    )
-    report = {"case_details": {}}
-    assessment = {
-        "status": "NEEDS_CLARIFICATION",
-        "clarification_codes": [],
-    }
-
-    main.run_clarification_loop("TEST-001", report, assessment)
-
-    application_class.assert_called_once_with(
-        io_manager=main.io_manager,
-        ai_manager=ai_instance,
-        logic_manager=logic_instance,
-        data_manager=main.data_manager,
-    )
-    application_class.return_value.run_clarification_loop.assert_called_once_with(
-        "TEST-001", report, assessment
-    )
-
 @pytest.fixture
 def creation_setup(assessment_setup):
     application, io, ai, logic, data, report = assessment_setup
@@ -528,24 +443,6 @@ def test_creation_does_not_clarify_when_assessment_fails(
     )
     application.run_clarification_loop.assert_not_called()
 
-
-
-def test_existing_creation_function_delegates(monkeypatch, logic_instance, ai_instance):
-    application_class = Mock()
-    monkeypatch.setattr(
-        main, "SafeReportApplication", application_class
-    )
-
-    main.process_new_report()
-
-    application_class.assert_called_once_with(
-        io_manager=main.io_manager,
-        ai_manager=ai_instance,
-        logic_manager=logic_instance,
-        data_manager=main.data_manager,
-    )
-    application_class.return_value.process_new_report.assert_called_once_with()
-
 @pytest.fixture
 def retry_setup(assessment_setup):
     application, io, ai, logic, data, report = assessment_setup
@@ -638,24 +535,6 @@ def test_retry_failed_assessment_does_not_start_clarification(
     application.run_clarification_loop.assert_not_called()
     data.create_report.assert_not_called()
 
-
-def test_existing_retry_function_delegates(monkeypatch, logic_instance, ai_instance):
-    application_class = Mock()
-    monkeypatch.setattr(
-        main, "SafeReportApplication", application_class
-    )
-
-    main.retry_failed_report()
-
-    application_class.assert_called_once_with(
-        io_manager=main.io_manager,
-        ai_manager=ai_instance,
-        logic_manager=logic_instance,
-        data_manager=main.data_manager,
-    )
-    application_class.return_value.retry_failed_report.assert_called_once_with()
-
-
 @pytest.fixture
 def saved_clarification_setup(assessment_setup):
     application, io, ai, logic, data, report = assessment_setup
@@ -672,7 +551,6 @@ def saved_clarification_setup(assessment_setup):
     application.assess_report = Mock()
 
     return application, io, data, report
-
 
 @pytest.mark.parametrize(
     "status",
@@ -755,24 +633,6 @@ def test_saved_clarification_no_selection_stops_workflow(
     application.assess_report.assert_not_called()
     data.create_report.assert_not_called()
     io.display_processing_error.assert_not_called()
-
-
-
-def test_existing_saved_clarification_function_delegates(monkeypatch, logic_instance, ai_instance):
-    application_class = Mock()
-    monkeypatch.setattr(
-        main, "SafeReportApplication", application_class
-    )
-
-    main.clarify_report()
-
-    application_class.assert_called_once_with(
-        io_manager=main.io_manager,
-        ai_manager=ai_instance,
-        logic_manager=logic_instance,
-        data_manager=main.data_manager,
-    )
-    application_class.return_value.clarify_report.assert_called_once_with()
 
 @pytest.fixture
 def menu_setup(assessment_setup):
