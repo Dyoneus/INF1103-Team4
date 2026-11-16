@@ -15,6 +15,7 @@ from ai_manager import (
     AIConfig,
     AIManager,
     AIProvider,
+    GeminiProvider,
     GroqProvider,
     OpenAIProvider,
     PhotoLoader,
@@ -24,6 +25,7 @@ from ai_manager import (
     ResponseValidator,
     RetryableProviderError,
     create_provider,
+    create_providers,
 )
 
 VALID_FIELDS = {
@@ -54,13 +56,16 @@ class FakeClient:
 class FakeProvider(AIProvider):
     """A vendor-free provider: replays scripted replies or raises scripted errors."""
 
-    def __init__(self, *outcomes):
+    def __init__(self, *outcomes, name="fake"):
+        self.name = name
         self.outcomes = list(outcomes)
         self.calls = 0
         self.last_image_urls = None
+        self.last_prompt = None
 
     def complete_json(self, prompt, image_urls=()):
         self.calls += 1
+        self.last_prompt = prompt
         self.last_image_urls = list(image_urls)
         outcome = self.outcomes.pop(0)
         if isinstance(outcome, BaseException):
@@ -300,3 +305,182 @@ def test_openai_provider_translates_errors_and_reads_reply():
         OpenAIProvider("m", client=make_client(unauthorized)).complete_json("p")
 
     assert OpenAIProvider("m", client=make_client(ok)).complete_json("p") == "REPLY"
+
+
+# --- Failover between providers ----------------------------------------------
+
+def test_next_provider_steps_in_when_first_fails_permanently():
+    groq = FakeProvider(ProviderError("HTTP 401"), name="groq")
+    gemini = FakeProvider(json.dumps(VALID_FIELDS), name="gemini")
+
+    manager = AIManager(providers=[groq, gemini])
+
+    assert manager.analyze_incident({}) == VALID_FIELDS
+    assert groq.calls == 1 and gemini.calls == 1
+
+
+def test_gemini_first_and_groq_as_backup_also_works():
+    gemini = FakeProvider(ProviderError("HTTP 503"), name="gemini")
+    groq = FakeProvider(json.dumps(VALID_FIELDS), name="groq")
+
+    assert AIManager(providers=[gemini, groq]).analyze_incident({}) == VALID_FIELDS
+
+
+def test_first_provider_is_not_retried_when_a_backup_exists():
+    groq = FakeProvider(
+        RetryableProviderError("busy"), RetryableProviderError("busy"), name="groq"
+    )
+    gemini = FakeProvider(json.dumps(VALID_FIELDS), name="gemini")
+
+    AIManager(providers=[groq, gemini]).analyze_incident({})
+
+    assert groq.calls == 1  # fallback_attempts defaults to 1
+
+
+def test_last_provider_still_gets_full_retries():
+    groq = FakeProvider(ProviderError("HTTP 401"), name="groq")
+    gemini = FakeProvider(
+        RetryableProviderError("busy"),
+        RetryableProviderError("busy"),
+        json.dumps(VALID_FIELDS),
+        name="gemini",
+    )
+
+    with patch.object(ai_manager.time, "sleep"):
+        result = AIManager(providers=[groq, gemini]).analyze_incident({})
+
+    assert result == VALID_FIELDS and gemini.calls == 3
+
+
+def test_bad_json_from_first_provider_falls_back_to_second():
+    groq = FakeProvider('{"not": "the schema"}', name="groq")
+    gemini = FakeProvider(json.dumps(VALID_FIELDS), name="gemini")
+
+    assert AIManager(providers=[groq, gemini]).analyze_incident({}) == VALID_FIELDS
+
+
+def test_error_names_every_provider_when_all_fail():
+    groq = FakeProvider(ProviderError("HTTP 401"), name="groq")
+    gemini = FakeProvider(ProviderError("HTTP 429"), name="gemini")
+
+    with pytest.raises(RuntimeError) as error:
+        AIManager(providers=[groq, gemini]).analyze_incident({})
+
+    message = str(error.value)
+    assert "All AI providers failed" in message
+    assert "groq failed: HTTP 401" in message
+    assert "gemini failed: HTTP 429" in message
+
+
+def test_single_provider_keeps_its_original_error():
+    only = FakeProvider(ProviderError("HTTP 401"), name="groq")
+
+    with pytest.raises(RuntimeError) as error:
+        AIManager(providers=[only]).analyze_incident({})
+
+    assert str(error.value) == "HTTP 401"
+
+
+def test_ensure_ready_passes_if_any_provider_is_usable():
+    class NotReady(FakeProvider):
+        def ensure_ready(self):
+            raise RuntimeError("GROQ_API_KEY is not configured.")
+
+    AIManager(providers=[NotReady(name="groq"), FakeProvider(name="gemini")]).ensure_ready()
+
+
+def test_ensure_ready_lists_every_problem_when_none_usable():
+    class NotReady(FakeProvider):
+        def ensure_ready(self):
+            raise RuntimeError(f"{self.name} key missing")
+
+    manager = AIManager(providers=[NotReady(name="groq"), NotReady(name="gemini")])
+
+    with pytest.raises(RuntimeError, match="groq failed: groq key missing.*gemini failed"):
+        manager.ensure_ready()
+
+
+def test_ai_provider_list_is_read_from_environment(monkeypatch):
+    monkeypatch.setenv("AI_PROVIDER", "groq, gemini")
+    monkeypatch.setenv("GEMINI_MODEL", "some-gemini-model")
+
+    providers = create_providers()
+
+    assert [type(p) for p in providers] == [GroqProvider, GeminiProvider]
+    assert [p.name for p in providers] == ["groq", "gemini"]
+
+
+def test_unknown_name_in_list_is_rejected():
+    with pytest.raises(RuntimeError, match="Unknown AI provider 'gemni'"):
+        create_providers("groq,gemni")
+
+
+def test_unconfigured_provider_does_not_break_the_chain(monkeypatch):
+    monkeypatch.delenv("GEMINI_MODEL", raising=False)
+    groq_client = FakeClient(json.dumps(VALID_FIELDS))
+    providers = create_providers("gemini,groq")
+    providers[1] = GroqProvider(client=groq_client)  # Groq works, Gemini has no model
+
+    result = AIManager(providers=providers).analyze_incident({})
+
+    assert result == VALID_FIELDS and groq_client.calls == 1
+    assert "GEMINI_MODEL" in str(
+        pytest.raises(RuntimeError, providers[0].ensure_ready).value
+    )
+
+
+def test_gemini_provider_points_at_google_endpoint():
+    provider = GeminiProvider("some-model")
+
+    assert provider._base_url == GeminiProvider.BASE_URL
+    assert provider._api_key_env == "GEMINI_API_KEY"
+
+
+def test_get_client_wrapper_returns_the_failover_manager(monkeypatch):
+    monkeypatch.delenv("AI_PROVIDER", raising=False)
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+
+    client = ai_manager.get_client()
+
+    assert isinstance(client, AIManager)
+
+
+def test_analyze_incident_wrapper_uses_a_manager_passed_as_client():
+    manager = AIManager(provider=FakeProvider(json.dumps(VALID_FIELDS)))
+
+    assert ai_manager.analyze_incident(manager, {"description": "x"}) == VALID_FIELDS
+
+
+# --- Photos are mentioned in the prompt only when they are really attached ---
+
+def test_prompt_without_photos_has_no_photo_section():
+    prompt = PromptBuilder().build({"description": "wet floor"})
+
+    assert "Photos:" not in prompt
+    assert "photo" not in prompt.lower()
+
+
+def test_prompt_with_photos_tells_the_model_how_to_use_them():
+    prompt = PromptBuilder().build({"description": "wet floor"}, photo_count=2)
+
+    assert "2 photo(s)" in prompt
+    flat = " ".join(prompt.split())  # ignore line wrapping
+    assert "from the written report only" in flat  # location/date/time stay text-based
+    assert prompt.index("Photos:") < prompt.index("Incident report:")
+
+
+def test_manager_mentions_photos_only_when_they_were_encoded(tmp_path):
+    photo = tmp_path / "p.png"
+    photo.write_bytes(b"\x89PNG")
+    with_photo = FakeProvider(json.dumps(VALID_FIELDS))
+    broken_photo = FakeProvider(json.dumps(VALID_FIELDS))
+    no_photo = FakeProvider(json.dumps(VALID_FIELDS))
+
+    AIManager(provider=with_photo).analyze_incident({}, [str(photo)])
+    AIManager(provider=broken_photo).analyze_incident({}, [str(tmp_path / "missing.png")])
+    AIManager(provider=no_photo).analyze_incident({})
+
+    assert "1 photo(s)" in with_photo.last_prompt
+    assert with_photo.last_image_urls
+    assert "Photos:" not in broken_photo.last_prompt  # unreadable file: not mentioned
+    assert "Photos:" not in no_photo.last_prompt
