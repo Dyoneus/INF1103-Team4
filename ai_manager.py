@@ -16,6 +16,7 @@ AIConfig                    retry/timeout settings
 ResponseValidator           checks the model's JSON against the allowed schema
 PromptBuilder               builds the instruction text sent to the model
 PhotoLoader                 finds consented photos and encodes them for the model
+ProviderFactory             builds providers from names / AI_PROVIDER (vendor registry)
 AIManager                   main entry point: tries each provider in order (failover)
 ReportBatchAnalyzer         standalone batch mode: reports/*.json -> ai_output.json
 
@@ -28,10 +29,6 @@ Choosing providers without code changes (environment variables):
     openai (generic or any OpenAI-compatible vendor):
         AI_MODEL (required), OPENAI_API_KEY, optional AI_BASE_URL and
         AI_API_KEY_ENV (name of the key variable)
-
-The module-level functions at the bottom are transitional wrappers so that
-main.py and the existing tests, which call ai_manager.<function>(...), keep
-working. Delete them once main.py holds its own AIManager instance.
 """
 
 import base64
@@ -49,7 +46,7 @@ from pathlib import Path
 import groq
 from groq import Groq
 
-import io_manager
+from io_manager import IOManager
 
 try:
     from dotenv import load_dotenv
@@ -101,11 +98,8 @@ class AIConfig:
     max_backoff: int = 30         # cap on any single wait between attempts
 
 
-# Old constant names, so other modules and tests that read them still work.
-_DEFAULT_CONFIG = AIConfig()
-MAX_ATTEMPTS = _DEFAULT_CONFIG.max_attempts
-REQUEST_TIMEOUT = _DEFAULT_CONFIG.request_timeout
-MAX_BACKOFF = _DEFAULT_CONFIG.max_backoff
+# Timeout for a provider that is built without an explicit AIConfig.
+REQUEST_TIMEOUT = AIConfig().request_timeout
 
 
 # --- Provider layer ---------------------------------------------------------
@@ -372,52 +366,68 @@ class _UnavailableProvider(AIProvider):
         raise ProviderError(self._error)
 
 
-PROVIDERS = {
-    "groq": GroqProvider,
-    "gemini": GeminiProvider,
-    "openai": OpenAIProvider,
-}
+class ProviderFactory:
+    """Builds AIProvider objects from provider names or the AI_PROVIDER variable.
 
-
-def _provider_names(names=None):
-    """Parse "groq,gemini" (argument or AI_PROVIDER) into an ordered name list."""
-    raw = names or os.environ.get("AI_PROVIDER") or "groq"
-    parsed = [part.strip().lower() for part in raw.split(",") if part.strip()]
-
-    for key in parsed:
-        if key not in PROVIDERS:
-            raise RuntimeError(
-                f"Unknown AI provider '{key}'. Choose one of: {sorted(PROVIDERS)}"
-            )
-
-    return parsed or ["groq"]
-
-
-def create_provider(name=None, client=None, timeout=REQUEST_TIMEOUT):
-    """Build the first provider named by `name` or AI_PROVIDER (default groq)."""
-    key = _provider_names(name)[0]
-    return PROVIDERS[key].from_env(client=client, timeout=timeout)
-
-
-def create_providers(names=None, client=None, timeout=REQUEST_TIMEOUT):
-    """Build every provider in the list, in order, for failover.
-
-    A provider that cannot be set up becomes an _UnavailableProvider instead of
-    raising, so the others still work. A given `client` goes to the first one.
+    The name -> class registry is the only place that lists the vendors.
+    Supporting a new vendor means writing one AIProvider subclass and
+    registering it here; AIManager and its retry logic stay untouched.
     """
-    providers = []
 
-    for index, key in enumerate(_provider_names(names)):
-        try:
-            providers.append(
-                PROVIDERS[key].from_env(
-                    client=client if index == 0 else None, timeout=timeout
+    DEFAULT_NAME = "groq"
+    DEFAULT_REGISTRY = {
+        "groq": GroqProvider,
+        "gemini": GeminiProvider,
+        "openai": OpenAIProvider,
+    }
+
+    def __init__(self, registry=None):
+        self._registry = dict(
+            self.DEFAULT_REGISTRY if registry is None else registry
+        )
+
+    def register(self, name, provider_class):
+        """Make another AIProvider subclass selectable by name."""
+        self._registry[name.strip().lower()] = provider_class
+
+    def names(self, names=None):
+        """Parse "groq,gemini" (argument or AI_PROVIDER) into an ordered name list."""
+        raw = names or os.environ.get("AI_PROVIDER") or self.DEFAULT_NAME
+        parsed = [part.strip().lower() for part in raw.split(",") if part.strip()]
+
+        for key in parsed:
+            if key not in self._registry:
+                raise RuntimeError(
+                    f"Unknown AI provider '{key}'. "
+                    f"Choose one of: {sorted(self._registry)}"
                 )
-            )
-        except RuntimeError as exc:
-            providers.append(_UnavailableProvider(key, exc))
 
-    return providers
+        return parsed or [self.DEFAULT_NAME]
+
+    def create(self, name=None, client=None, timeout=REQUEST_TIMEOUT):
+        """Build the first provider named by `name` or AI_PROVIDER (default groq)."""
+        key = self.names(name)[0]
+        return self._registry[key].from_env(client=client, timeout=timeout)
+
+    def create_all(self, names=None, client=None, timeout=REQUEST_TIMEOUT):
+        """Build every provider in the list, in order, for failover.
+
+        A provider that cannot be set up becomes an _UnavailableProvider instead
+        of raising, so the others still work. A given `client` goes to the first.
+        """
+        providers = []
+
+        for index, key in enumerate(self.names(names)):
+            try:
+                providers.append(
+                    self._registry[key].from_env(
+                        client=client if index == 0 else None, timeout=timeout
+                    )
+                )
+            except RuntimeError as exc:
+                providers.append(_UnavailableProvider(key, exc))
+
+        return providers
 
 
 class ResponseValidator:
@@ -672,6 +682,7 @@ class AIManager:
         prompt_builder=None,
         photo_loader=None,
         providers=None,
+        provider_factory=None,
     ):
         if providers:
             self._providers = list(providers)
@@ -680,6 +691,7 @@ class AIManager:
         else:
             self._providers = None
 
+        self._factory = provider_factory or ProviderFactory()
         self._config = config or AIConfig()
         self._validator = validator or ResponseValidator()
         self._prompts = prompt_builder or PromptBuilder(
@@ -698,7 +710,7 @@ class AIManager:
     @property
     def providers(self):
         if self._providers is None:
-            self._providers = create_providers(
+            self._providers = self._factory.create_all(
                 timeout=self._config.request_timeout
             )
         return self._providers
@@ -850,7 +862,7 @@ class ReportBatchAnalyzer:
 
     def __init__(self, ai=None, io=None):
         self._ai = ai or AIManager()
-        self._io = io or io_manager
+        self._io = io or IOManager()
 
     @staticmethod
     def get_output_path(project_dir):
@@ -946,66 +958,23 @@ class ReportBatchAnalyzer:
 
         return 0 if failed == 0 else 1
 
+    @classmethod
+    def main(cls, project_dir=None):
+        """Command-line entry point: analyse every saved report.
 
-# --- Transitional wrappers -------------------------------------------------
-# main.py and the existing tests still call ai_manager.<function>(...).
-# Each wrapper just builds the matching class and delegates, so all behaviour
-# lives in the classes above. Delete this block once main.py creates and holds
-# its own AIManager instance.
+        Returns a process exit code: 0 when every report succeeded, 1 when
+        some failed, 2 when the batch could not run at all.
+        """
+        io = IOManager()
 
-def get_client():
-    # main.py / web_app.py treat this as an opaque "client" and hand it back to
-    # analyze_incident, so returning the whole failover manager gives them
-    # fallback without any change on their side.
-    manager = AIManager()
-    manager.ensure_ready()
-    return manager
-
-
-def validate_response(text, has_photos=False):
-    return ResponseValidator().validate(text, has_photos=has_photos)
-
-
-def build_prompt(incident_report, photo_count=0):
-    return PromptBuilder().build(incident_report, photo_count)
-
-
-def encode_image(photo_path):
-    return PhotoLoader().encode(photo_path)
-
-
-def collect_photo_paths(case_details, project_dir):
-    return PhotoLoader().collect_paths(case_details, project_dir)
-
-
-def _manager_for(client):
-    """Accept either a manager from get_client() or a raw SDK client."""
-    if isinstance(client, AIManager):
-        return client
-    return AIManager(providers=create_providers(client=client))
-
-
-def analyze_incident(client, incident_report, photo_paths=None):
-    return _manager_for(client).analyze_incident(incident_report, photo_paths)
-
-
-def make_result(reference_id, fields=None, error=None):
-    return AIManager().make_result(reference_id, fields=fields, error=error)
-
-
-def process_report(client, report_path, project_dir, client_error=None):
-    analyzer = ReportBatchAnalyzer(ai=_manager_for(client))
-    return analyzer.process_report(report_path, project_dir, client_error)
-
-
-def get_output_path(project_dir):
-    return ReportBatchAnalyzer.get_output_path(project_dir)
-
-
-def main():
-    """Analyse every report and save all results to ai_output.json."""
-    project_dir = Path(__file__).resolve().parent
-    return ReportBatchAnalyzer().run(project_dir)
+        try:
+            return cls(io=io).run(
+                project_dir or Path(__file__).resolve().parent
+            )
+        except Exception as exc:
+            logger.error("Incident analysis failed: %s", exc)
+            io.display_analysis_error(str(exc))
+            return 2
 
 
 if __name__ == "__main__":
@@ -1013,10 +982,4 @@ if __name__ == "__main__":
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
     )
-
-    try:
-        sys.exit(main())
-    except Exception as exc:
-        logger.error("Incident analysis failed: %s", exc)
-        io_manager.display_analysis_error(str(exc))
-        sys.exit(2)
+    sys.exit(ReportBatchAnalyzer.main())
