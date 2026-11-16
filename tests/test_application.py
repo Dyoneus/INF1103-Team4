@@ -1,8 +1,9 @@
 from unittest.mock import Mock, call
+from pathlib import Path
 
+import json
 import pytest
 import main
-
 
 def test_constructor_keeps_supplied_managers_without_calling_them():
     managers = [Mock() for _ in range(4)]
@@ -58,31 +59,12 @@ def test_ai_failure_uses_injected_managers(error_code, save_succeeds):
         call.io.display_processing_error(expected_error),
     ]
 
-
-def test_existing_function_delegates_to_application(monkeypatch):
-    application_class = Mock()
-    monkeypatch.setattr(
-        main, "SafeReportApplication", application_class
-    )
-
-    main.handle_ai_failure("TEST-001", "CONFIG_MISSING")
-
-    application_class.assert_called_once_with(
-        io_manager=main.io_manager,
-        ai_manager=main.ai_manager,
-        logic_manager=main.logic_manager,
-        data_manager=main.data_manager,
-    )
-    application_class.return_value.handle_ai_failure.assert_called_once_with(
-        "TEST-001", "CONFIG_MISSING"
-    )
-
 @pytest.fixture
 def assessment_setup():
     io = Mock(spec=main.io_manager.IOManager)
-    ai = Mock(spec=main.ai_manager)
-    logic = Mock(spec=main.logic_manager)
-    data = Mock(spec=main.data_manager)
+    ai = Mock(spec=main.ai_manager.AIManager)
+    logic = Mock(spec=main.logic_manager.LogicManager)
+    data = Mock(spec=main.data_manager.DataManager)
     application = main.SafeReportApplication(io, ai, logic, data)
 
     ai.analyze_incident.return_value = {
@@ -121,9 +103,8 @@ def test_assessment_respects_consent_and_saves_result(
 
     expected_photos = ["evidence.jpg"] if consent is True else []
 
-    ai.get_client.assert_called_once_with()
+    ai.ensure_ready.assert_called_once_with()
     ai.analyze_incident.assert_called_once_with(
-        ai.get_client.return_value,
         {
             "description": "Exposed electrical cable.",
             "consent_for_image_use": consent,
@@ -159,7 +140,7 @@ def test_assessment_routes_failures_to_instance_handler(
     application.handle_ai_failure = Mock()
 
     if error_code == "CONFIG_MISSING":
-        ai.get_client.side_effect = RuntimeError("Missing configuration")
+        ai.ensure_ready.side_effect = RuntimeError("Missing configuration")
     elif error_code == "AI_FAILED":
         ai.analyze_incident.side_effect = RuntimeError("API failed")
     else:
@@ -195,28 +176,6 @@ def test_assessment_save_failure_does_not_display_success(
     )
     io.display_processing_error.assert_called_once_with("SAVE_FAILED")
     io.display_assessment_result.assert_not_called()
-
-
-def test_existing_assessment_function_delegates(monkeypatch):
-    application_class = Mock()
-    monkeypatch.setattr(
-        main, "SafeReportApplication", application_class
-    )
-    report = {"case_details": {}}
-
-    result = main.assess_report("TEST-001", report)
-
-    application_class.assert_called_once_with(
-        io_manager=main.io_manager,
-        ai_manager=main.ai_manager,
-        logic_manager=main.logic_manager,
-        data_manager=main.data_manager,
-    )
-    application_class.return_value.assess_report.assert_called_once_with(
-        "TEST-001", report
-    )
-
-    assert result is application_class.return_value.assess_report.return_value
 
 @pytest.fixture
 def clarification_setup(assessment_setup):
@@ -376,26 +335,432 @@ def test_clarification_displays_only_outstanding_questions_at_limit(
             ["CLARIFY_LOCATION"]
         )
 
+@pytest.fixture
+def creation_setup(assessment_setup):
+    application, io, ai, logic, data, report = assessment_setup
 
-def test_existing_clarification_function_delegates(monkeypatch):
-    application_class = Mock()
-    monkeypatch.setattr(
-        main, "SafeReportApplication", application_class
-    )
-    report = {"case_details": {}}
-    assessment = {
+    io.collect_report.return_value = report
+    io.review_report_before_submission.return_value = report
+    data.create_report.return_value = Path("reports/NEW-001.json")
+
+    application.assess_report = Mock(return_value={
         "status": "NEEDS_CLARIFICATION",
+        "clarification_codes": ["CLARIFY_LOCATION"],
+    })
+    application.run_clarification_loop = Mock()
+
+    return application, io, data, report
+
+
+def test_creation_uses_reviewed_report_and_saves_before_assessment(
+    creation_setup
+):
+    application, io, data, report = creation_setup
+
+    reviewed_report = {
+        "reporter": report["reporter"].copy(),
+        "case_details": report["case_details"].copy(),
+    }
+    reviewed_report["case_details"]["description"] = (
+        "Sparks from an exposed electrical cable."
+    )
+    io.review_report_before_submission.return_value = reviewed_report
+
+    assessment = application.assess_report.return_value
+
+    events = Mock()
+    events.attach_mock(io, "io")
+    events.attach_mock(data, "data")
+    events.attach_mock(application.assess_report, "assess")
+    events.attach_mock(application.run_clarification_loop, "clarify")
+
+    application.process_new_report()
+
+    assert events.mock_calls == [
+        call.io.collect_report(),
+        call.io.review_report_before_submission(report),
+        call.data.create_report(reviewed_report),
+        call.io.display_report_reference("NEW-001"),
+        call.assess("NEW-001", reviewed_report),
+        call.clarify("NEW-001", reviewed_report, assessment),
+    ]
+
+
+@pytest.mark.parametrize("stage", ["collection", "review"])
+def test_creation_cancellation_stops_before_saving(
+    creation_setup, stage
+):
+    application, io, data, report = creation_setup
+
+    if stage == "collection":
+        io.collect_report.return_value = None
+    else:
+        io.review_report_before_submission.return_value = None
+
+    application.process_new_report()
+
+    io.collect_report.assert_called_once_with()
+
+    if stage == "collection":
+        io.review_report_before_submission.assert_not_called()
+    else:
+        io.review_report_before_submission.assert_called_once_with(report)
+
+    data.create_report.assert_not_called()
+    application.assess_report.assert_not_called()
+    application.run_clarification_loop.assert_not_called()
+    io.display_report_reference.assert_not_called()
+    io.display_processing_error.assert_not_called()
+
+
+def test_creation_save_failure_stops_before_assessment(
+    creation_setup
+):
+    application, io, data, report = creation_setup
+    data.create_report.side_effect = OSError("Disk unavailable")
+
+    application.process_new_report()
+
+    data.create_report.assert_called_once_with(report)
+    io.display_processing_error.assert_called_once_with("SAVE_FAILED")
+    io.display_report_reference.assert_not_called()
+    application.assess_report.assert_not_called()
+    application.run_clarification_loop.assert_not_called()
+
+
+def test_creation_does_not_clarify_when_assessment_fails(
+    creation_setup
+):
+    application, io, data, report = creation_setup
+    application.assess_report.return_value = None
+
+    application.process_new_report()
+
+    data.create_report.assert_called_once_with(report)
+    io.display_report_reference.assert_called_once_with("NEW-001")
+    application.assess_report.assert_called_once_with(
+        "NEW-001", report
+    )
+    application.run_clarification_loop.assert_not_called()
+
+@pytest.fixture
+def retry_setup(assessment_setup):
+    application, io, ai, logic, data, report = assessment_setup
+
+    report["reference_id"] = "RETRY-001"
+    report["assessment"] = {
+        "status": "AI_FAILED",
         "clarification_codes": [],
     }
 
-    main.run_clarification_loop("TEST-001", report, assessment)
+    data.get_failed_ai_reports.return_value = [report]
+    io.select_saved_report.return_value = report
 
+    application.assess_report = Mock(return_value={
+        "status": "NEEDS_CLARIFICATION",
+        "clarification_codes": ["CLARIFY_LOCATION"],
+    })
+    application.run_clarification_loop = Mock()
+
+    return application, io, data, report
+
+
+def test_retry_assesses_selected_record_without_creating_another(
+    retry_setup
+):
+    application, io, data, report = retry_setup
+    reports = [{"reference_id": "OTHER-001"}, report]
+    data.get_failed_ai_reports.return_value = reports
+    assessment = application.assess_report.return_value
+
+    events = Mock()
+    events.attach_mock(data, "data")
+    events.attach_mock(io, "io")
+    events.attach_mock(application.assess_report, "assess")
+    events.attach_mock(application.run_clarification_loop, "clarify")
+
+    application.retry_failed_report()
+
+    assert events.mock_calls == [
+        call.data.get_failed_ai_reports(),
+        call.io.select_saved_report(reports),
+        call.assess("RETRY-001", report),
+        call.clarify("RETRY-001", report, assessment),
+    ]
+    data.create_report.assert_not_called()
+
+
+def test_retry_load_failure_stops_before_selection(retry_setup):
+    application, io, data, report = retry_setup
+    data.get_failed_ai_reports.return_value = None
+
+    application.retry_failed_report()
+
+    io.display_processing_error.assert_called_once_with("LOAD_FAILED")
+    io.select_saved_report.assert_not_called()
+    application.assess_report.assert_not_called()
+    application.run_clarification_loop.assert_not_called()
+    data.create_report.assert_not_called()
+
+
+@pytest.mark.parametrize("has_reports", [False, True])
+def test_retry_no_selection_stops_without_assessment(
+    retry_setup, has_reports
+):
+    application, io, data, report = retry_setup
+    reports = [report] if has_reports else []
+    data.get_failed_ai_reports.return_value = reports
+    io.select_saved_report.return_value = None
+
+    application.retry_failed_report()
+
+    io.select_saved_report.assert_called_once_with(reports)
+    io.display_processing_error.assert_not_called()
+    application.assess_report.assert_not_called()
+    application.run_clarification_loop.assert_not_called()
+    data.create_report.assert_not_called()
+
+
+def test_retry_failed_assessment_does_not_start_clarification(
+    retry_setup
+):
+    application, io, data, report = retry_setup
+    application.assess_report.return_value = None
+
+    application.retry_failed_report()
+
+    application.assess_report.assert_called_once_with(
+        "RETRY-001", report
+    )
+    application.run_clarification_loop.assert_not_called()
+    data.create_report.assert_not_called()
+
+@pytest.fixture
+def saved_clarification_setup(assessment_setup):
+    application, io, ai, logic, data, report = assessment_setup
+
+    report["reference_id"] = "CLARIFY-002"
+    report["assessment"] = {
+        "status": "NEEDS_CLARIFICATION",
+        "clarification_codes": ["CLARIFY_LOCATION"],
+    }
+
+    data.load_reports.return_value = [report]
+    io.select_saved_report.return_value = report
+    application.run_clarification_loop = Mock()
+    application.assess_report = Mock()
+
+    return application, io, data, report
+
+@pytest.mark.parametrize(
+    "status",
+    ["INCOMPLETE", "NEEDS_CLARIFICATION"],
+)
+def test_saved_clarification_filters_and_resumes_selected_record(
+    saved_clarification_setup, status
+):
+    application, io, data, report = saved_clarification_setup
+    report["assessment"]["status"] = status
+
+    other_eligible = {
+        "reference_id": "CLARIFY-001",
+        "case_details": {},
+        "assessment": {
+            "status": "NEEDS_CLARIFICATION",
+            "clarification_codes": ["CLARIFY_LOCATION"],
+        },
+    }
+
+    data.load_reports.return_value = [
+        {
+            "reference_id": "READY",
+            "assessment": {"status": "READY_FOR_REVIEW"},
+        },
+        {
+            "reference_id": "FAILED",
+            "assessment": {"status": "AI_FAILED"},
+        },
+        {"reference_id": "MISSING"},
+        {"reference_id": "NULL", "assessment": None},
+        {"reference_id": "BAD", "assessment": "invalid"},
+        other_eligible,
+        report,
+    ]
+
+    application.clarify_report()
+
+    data.load_reports.assert_called_once_with()
+    io.select_saved_report.assert_called_once_with(
+        [other_eligible, report]
+    )
+    application.run_clarification_loop.assert_called_once_with(
+        "CLARIFY-002", report, report["assessment"]
+    )
+    application.assess_report.assert_not_called()
+    data.create_report.assert_not_called()
+    io.display_processing_error.assert_not_called()
+
+
+def test_saved_clarification_load_failure_stops_selection(
+    saved_clarification_setup
+):
+    application, io, data, report = saved_clarification_setup
+    data.load_reports.return_value = None
+
+    application.clarify_report()
+
+    io.display_processing_error.assert_called_once_with("LOAD_FAILED")
+    io.select_saved_report.assert_not_called()
+    application.run_clarification_loop.assert_not_called()
+    application.assess_report.assert_not_called()
+    data.create_report.assert_not_called()
+
+
+@pytest.mark.parametrize("has_eligible_reports", [False, True])
+def test_saved_clarification_no_selection_stops_workflow(
+    saved_clarification_setup, has_eligible_reports
+):
+    application, io, data, report = saved_clarification_setup
+    reports = [report] if has_eligible_reports else []
+
+    data.load_reports.return_value = reports
+    io.select_saved_report.return_value = None
+
+    application.clarify_report()
+
+    io.select_saved_report.assert_called_once_with(reports)
+    application.run_clarification_loop.assert_not_called()
+    application.assess_report.assert_not_called()
+    data.create_report.assert_not_called()
+    io.display_processing_error.assert_not_called()
+
+@pytest.fixture
+def menu_setup(assessment_setup):
+    application, io, ai, logic, data, report = assessment_setup
+
+    data.load_reports.return_value = []
+    io.get_menu_choice.return_value = "0"
+
+    application.process_new_report = Mock()
+    application.retry_failed_report = Mock()
+    application.clarify_report = Mock()
+
+    return application, io, data
+
+
+def test_menu_dispatches_workflows_on_the_same_application(menu_setup):
+    application, io, data = menu_setup
+    io.get_menu_choice.side_effect = ["1", "2", "3", "0"]
+
+    workflows = Mock()
+    workflows.attach_mock(application.process_new_report, "create")
+    workflows.attach_mock(application.retry_failed_report, "retry")
+    workflows.attach_mock(application.clarify_report, "clarify")
+
+    application.run()
+
+    assert workflows.mock_calls == [
+        call.create(),
+        call.retry(),
+        call.clarify(),
+    ]
+    data.load_reports.assert_called_once_with()
+    assert io.display_menu.call_count == 4
+    assert io.get_menu_choice.call_count == 4
+    io.display_processing_error.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "reports",
+    [[], [{"reference_id": "SAVED-001"}]],
+)
+def test_menu_exit_does_not_start_a_workflow(menu_setup, reports):
+    application, io, data = menu_setup
+    data.load_reports.return_value = reports
+
+    application.run()
+
+    data.load_reports.assert_called_once_with()
+    io.display_menu.assert_called_once_with()
+    io.get_menu_choice.assert_called_once_with()
+    application.process_new_report.assert_not_called()
+    application.retry_failed_report.assert_not_called()
+    application.clarify_report.assert_not_called()
+    io.display_processing_error.assert_not_called()
+
+
+def test_menu_load_failure_stops_before_showing_menu(menu_setup):
+    application, io, data = menu_setup
+    data.load_reports.return_value = None
+
+    application.run()
+
+    data.load_reports.assert_called_once_with()
+    io.display_processing_error.assert_called_once_with("LOAD_FAILED")
+    io.display_menu.assert_not_called()
+    io.get_menu_choice.assert_not_called()
+    application.process_new_report.assert_not_called()
+    application.retry_failed_report.assert_not_called()
+    application.clarify_report.assert_not_called()
+
+
+def test_run_constructs_managers_and_starts_application(monkeypatch):
+    io = Mock(spec=main.io_manager.IOManager)
+    ai = Mock(spec=main.ai_manager.AIManager)
+    logic = Mock(spec=main.logic_manager.LogicManager)
+    data = Mock(spec=main.data_manager.DataManager)
+
+    io_class = Mock(return_value=io)
+    ai_class = Mock(return_value=ai)
+    logic_class = Mock(return_value=logic)
+    data_class = Mock(return_value=data)
+    application_class = Mock()
+
+    monkeypatch.setattr(main.io_manager, "IOManager", io_class)
+    monkeypatch.setattr(main.ai_manager, "AIManager", ai_class)
+    monkeypatch.setattr(main.logic_manager, "LogicManager", logic_class)
+    monkeypatch.setattr(main.data_manager, "DataManager", data_class)
+    monkeypatch.setattr(main, "SafeReportApplication", application_class)
+
+    result = main.run()
+
+    io_class.assert_called_once_with()
+    ai_class.assert_called_once_with()
+    logic_class.assert_called_once_with()
+    data_class.assert_called_once_with()
     application_class.assert_called_once_with(
-        io_manager=main.io_manager,
-        ai_manager=main.ai_manager,
-        logic_manager=main.logic_manager,
-        data_manager=main.data_manager,
+        io_manager=io,
+        ai_manager=ai,
+        logic_manager=logic,
+        data_manager=data,
     )
-    application_class.return_value.run_clarification_loop.assert_called_once_with(
-        "TEST-001", report, assessment
+    application_class.return_value.run.assert_called_once_with()
+    assert result is application_class.return_value.run.return_value
+
+def test_assessment_works_with_real_ai_manager(assessment_setup):
+    application, io, ai, logic, data, report = assessment_setup
+    fields = ai.analyze_incident.return_value
+
+    provider = Mock(spec=main.ai_manager.AIProvider)
+    provider.complete_json.return_value = json.dumps(fields)
+    real_ai = main.ai_manager.AIManager(provider=provider)
+
+    application = main.SafeReportApplication(
+        io, real_ai, main.logic_manager.LogicManager(), data
     )
+
+    result = application.assess_report("TEST-001", report)
+
+    assert result == {
+        "status": "READY_FOR_REVIEW",
+        "clarification_codes": [],
+    }
+    provider.ensure_ready.assert_called_once_with()
+    provider.complete_json.assert_called_once()
+    data.save_report.assert_called_once_with(
+        "TEST-001",
+        real_ai.make_result("TEST-001", fields=fields),
+        result,
+    )
+    io.display_assessment_result.assert_called_once_with(result)
+    io.display_processing_error.assert_not_called()

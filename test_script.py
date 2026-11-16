@@ -2,7 +2,7 @@
 """Test script to demonstrate SafeReport's business rules."""
 #you can try to run this test script by running: python -m pytest test_script.py -v
 
-from logic_manager import determine_report_status
+from logic_manager import LogicManager
 
 
 # sample structured output from AI Manager
@@ -20,7 +20,8 @@ def sample_ai_output():
 def test_ready_for_review():
     ai_output = sample_ai_output()
 
-    result = determine_report_status(ai_output)
+    logic = LogicManager()
+    result = logic.determine_report_status(ai_output)
 
     assert result["status"] == "READY_FOR_REVIEW"
     assert result["clarification_codes"] == []
@@ -32,7 +33,8 @@ def test_approximate_date_and_time():
     ai_output["date_quality"] = "APPROXIMATE"
     ai_output["time_quality"] = "APPROXIMATE"
 
-    result = determine_report_status(ai_output)
+    logic = LogicManager()
+    result = logic.determine_report_status(ai_output)
 
     assert result["status"] == "READY_FOR_REVIEW"
 
@@ -42,7 +44,8 @@ def test_unclear_safety_observation():
     ai_output = sample_ai_output()
     ai_output["issue_clarity"] = "UNCLEAR"
 
-    result = determine_report_status(ai_output)
+    logic = LogicManager()
+    result = logic.determine_report_status(ai_output)
 
     assert result["status"] == "INCOMPLETE"
     assert result["clarification_codes"] == ["CLARIFY_OBSERVATION"]
@@ -53,7 +56,8 @@ def test_missing_location():
     ai_output = sample_ai_output()
     ai_output["location_quality"] = "MISSING"
 
-    result = determine_report_status(ai_output)
+    logic = LogicManager()
+    result = logic.determine_report_status(ai_output)
 
     assert result["status"] == "INCOMPLETE"
     assert result["clarification_codes"] == ["ADD_LOCATION"]
@@ -64,7 +68,8 @@ def test_vague_location():
     ai_output = sample_ai_output()
     ai_output["location_quality"] = "VAGUE"
 
-    result = determine_report_status(ai_output)
+    logic = LogicManager()
+    result = logic.determine_report_status(ai_output)
 
     assert result["status"] == "NEEDS_CLARIFICATION"
     assert result["clarification_codes"] == ["CLARIFY_LOCATION"]
@@ -75,7 +80,8 @@ def test_missing_date():
     ai_output = sample_ai_output()
     ai_output["date_quality"] = "MISSING"
 
-    result = determine_report_status(ai_output)
+    logic = LogicManager()
+    result = logic.determine_report_status(ai_output)
 
     assert result["status"] == "NEEDS_CLARIFICATION"
     assert result["clarification_codes"] == ["ADD_DATE"]
@@ -86,7 +92,8 @@ def test_missing_time():
     ai_output = sample_ai_output()
     ai_output["time_quality"] = "MISSING"
 
-    result = determine_report_status(ai_output)
+    logic = LogicManager()
+    result = logic.determine_report_status(ai_output)
 
     assert result["status"] == "NEEDS_CLARIFICATION"
     assert result["clarification_codes"] == ["ADD_TIME"]
@@ -100,7 +107,8 @@ def test_multiple_missing_fields():
     ai_output["location_quality"] = "MISSING"
     ai_output["time_quality"] = "MISSING"
 
-    result = determine_report_status(ai_output)
+    logic = LogicManager()
+    result = logic.determine_report_status(ai_output)
 
     assert result["status"] == "INCOMPLETE"
     assert result["clarification_codes"] == [

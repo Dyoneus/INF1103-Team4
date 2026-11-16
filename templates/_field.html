@@ -1,0 +1,41 @@
+{# One labelled form control with its error message. #}
+{% macro error(errors, name) %}
+  {% if errors.get(name) %}<p class="field-error" id="{{ name }}-error">{{ errors[name] }}</p>{% endif %}
+{% endmacro %}
+
+{% macro text(name, label, values, errors, type='text', maxlength=None, max=None, hint=None, autocomplete=None) %}
+  <div class="field">
+    <label for="{{ name }}">{{ label }}</label>
+    <input id="{{ name }}" name="{{ name }}" type="{{ type }}" value="{{ values.get(name, '') }}" required
+           {% if maxlength %}maxlength="{{ maxlength }}"{% endif %}
+           {% if max %}max="{{ max }}"{% endif %}
+           {% if autocomplete %}autocomplete="{{ autocomplete }}"{% endif %}
+           {% if errors.get(name) %}aria-invalid="true" aria-describedby="{{ name }}-error"{% endif %}>
+    {% if hint %}<p class="hint">{{ hint }}</p>{% endif %}
+    {{ error(errors, name) }}
+  </div>
+{% endmacro %}
+
+{% macro textarea(name, label, values, errors, maxlength) %}
+  <div class="field">
+    <label for="{{ name }}">{{ label }}</label>
+    <textarea id="{{ name }}" name="{{ name }}" rows="5" maxlength="{{ maxlength }}" required
+              {% if errors.get(name) %}aria-invalid="true" aria-describedby="{{ name }}-error"{% endif %}>{{ values.get(name, '') }}</textarea>
+    <p class="hint">Up to {{ maxlength }} characters.</p>
+    {{ error(errors, name) }}
+  </div>
+{% endmacro %}
+
+{% macro select(name, label, options, values, errors) %}
+  <div class="field">
+    <label for="{{ name }}">{{ label }}</label>
+    <select id="{{ name }}" name="{{ name }}" required
+            {% if errors.get(name) %}aria-invalid="true" aria-describedby="{{ name }}-error"{% endif %}>
+      <option value="">Choose&hellip;</option>
+      {% for option in options %}
+        <option value="{{ option }}" {{ 'selected' if values.get(name) == option }}>{{ option }}</option>
+      {% endfor %}
+    </select>
+    {{ error(errors, name) }}
+  </div>
+{% endmacro %}

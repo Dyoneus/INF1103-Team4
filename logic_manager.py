@@ -1,151 +1,198 @@
-# Allowed values from the AI Manager
-ALLOWED_VALUES = {
-    "issue_clarity": ["CLEAR", "UNCLEAR"],
-    "location_quality": ["ADEQUATE", "VAGUE", "MISSING"],
-    "date_quality": ["EXACT", "APPROXIMATE", "MISSING"],
-    "time_quality": ["EXACT", "APPROXIMATE", "MISSING"],
-    "safety_category": [
-        "FIRE",
-        "ELECTRICAL",
-        "SLIP_TRIP_FALL",
-        "STRUCTURAL",
-        "EQUIPMENT",
-        "CHEMICAL",
-        "ENVIRONMENTAL",
-        "OTHER",
-        "UNCLEAR"
-    ]
-}
 
-# Check whether one AI result is valid
-def validate_ai_output(ai_output):
-    if not isinstance(ai_output, dict):
-        return False
+class LogicManager:
 
-    # Success results include "error": None; only actual failures are invalid.
-    if ai_output.get("status") == "error" or ai_output.get("error") is not None:
-        return False
-
-    for field, allowed_values in ALLOWED_VALUES.items():
-        value = ai_output.get(field)
-
-        if not isinstance(value, str):
-            return False
-
-        if value not in allowed_values:
-            return False
-
-    return True
-
-# Check for incomplete reports
-def check_incomplete(ai_output):
-    if not validate_ai_output(ai_output):
-        return False
-
-    if (
-        ai_output["issue_clarity"] == "UNCLEAR"
-        or ai_output["location_quality"] == "MISSING"
-    ):
-        return True
-
-    return False
-
-# Identify reports needing clarification
-def check_needs_clarification(ai_output):
-    if not validate_ai_output(ai_output):
-        return False
-
-    if check_incomplete(ai_output):
-        return False
-
-    if (
-        ai_output["location_quality"] == "VAGUE"
-        or ai_output["date_quality"] == "MISSING"
-        or ai_output["time_quality"] == "MISSING"
-    ):
-        return True
-
-    return False
-
-# Identify reports ready for review
-def check_ready_for_review(ai_output):
-    if not validate_ai_output(ai_output):
-        return False
-
-    # Reports with missing or unclear information are not ready
-    if check_incomplete(ai_output):
-        return False
-
-    if check_needs_clarification(ai_output):
-        return False
-
-    if (
-        ai_output["issue_clarity"] == "CLEAR"
-        and ai_output["location_quality"] == "ADEQUATE"
-        and ai_output["date_quality"] in ["EXACT", "APPROXIMATE"]
-        and ai_output["time_quality"] in ["EXACT", "APPROXIMATE"]
-    ):
-        return True
-
-    return False
-
-# Apply rules in the correct order
-def determine_report_status(ai_output):
-
-    # Rule 1: AI_FAILED
-    if not validate_ai_output(ai_output):
-        return {
-            "status": "AI_FAILED",
-            "clarification_codes": []
+    def __init__(self):
+        # Allowed values from the AI Manager
+        self.__allowed_values = {
+            "issue_clarity": ["CLEAR", "UNCLEAR"],
+            "location_quality": ["ADEQUATE", "VAGUE", "MISSING"],
+            "date_quality": ["EXACT", "APPROXIMATE", "MISSING"],
+            "time_quality": ["EXACT", "APPROXIMATE", "MISSING"],
+            "safety_category": [
+                "FIRE",
+                "ELECTRICAL",
+                "SLIP_TRIP_FALL",
+                "STRUCTURAL",
+                "EQUIPMENT",
+                "CHEMICAL",
+                "ENVIRONMENTAL",
+                "OTHER",
+                "UNCLEAR"
+            ]
         }
 
-    clarification_codes = []
+    # Check whether one AI result is valid
+    def validate_ai_output(self, ai_output):
+        if not isinstance(ai_output, dict):
+            return False
 
-    if ai_output["issue_clarity"] == "UNCLEAR":
-        clarification_codes.append("CLARIFY_OBSERVATION")
+        # Success results include "error": None; only actual failures are invalid.
+        if ai_output.get("status") == "error" or ai_output.get("error") is not None:
+            return False
 
-    if ai_output["location_quality"] == "MISSING":
-        clarification_codes.append("ADD_LOCATION")
-    elif ai_output["location_quality"] == "VAGUE":
-        clarification_codes.append("CLARIFY_LOCATION")
+        for field, allowed_values in self.__allowed_values.items():
+            value = ai_output.get(field)
 
-    if ai_output["date_quality"] == "MISSING":
-        clarification_codes.append("ADD_DATE")
+            if not isinstance(value, str):
+                return False
 
-    if ai_output["time_quality"] == "MISSING":
-        clarification_codes.append("ADD_TIME")
+            if value not in allowed_values:
+                return False
 
-    # Rule 2: INCOMPLETE
-    if check_incomplete(ai_output):
-        status = "INCOMPLETE"
+        return True
 
-    # Rule 3: NEEDS_CLARIFICATION
-    elif check_needs_clarification(ai_output):
-        status = "NEEDS_CLARIFICATION"
+    # Check for incomplete reports
+    def check_incomplete(self, ai_output):
+        if not self.validate_ai_output(ai_output):
+            return False
 
-    # Rule 4: READY_FOR_REVIEW
-    elif check_ready_for_review(ai_output):
-        status = "READY_FOR_REVIEW"
+        if (
+            ai_output["issue_clarity"] == "UNCLEAR"
+            or ai_output["location_quality"] == "MISSING"
+        ):
+            return True
 
-    # For unexpected combinations
-    else:
-        status = "AI_FAILED"
+        return False
 
-    return {
-        "status": status,
-        "clarification_codes": clarification_codes
-    }
+    # Identify reports needing clarification
+    def check_needs_clarification(self, ai_output):
+        if not self.validate_ai_output(ai_output):
+            return False
 
-# Return consistent results for all AI outputs
-def process_ai_outputs(ai_outputs):
+        if self.check_incomplete(ai_output):
+            return False
 
-    if not isinstance(ai_outputs, list):
-        return []
+        if (
+            ai_output["location_quality"] == "VAGUE"
+            or ai_output["date_quality"] == "MISSING"
+            or ai_output["time_quality"] == "MISSING"
+        ):
+            return True
 
-    processed_reports = []
+        return False
 
-    for ai_output in ai_outputs:
-        result = determine_report_status(ai_output)
-        processed_reports.append(result)
+    # Identify reports ready for review
+    def check_ready_for_review(self, ai_output):
+        if not self.validate_ai_output(ai_output):
+            return False
 
-    return processed_reports
+        # Reports with missing or unclear information are not ready
+        if self.check_incomplete(ai_output):
+            return False
+
+        if self.check_needs_clarification(ai_output):
+            return False
+
+        if (
+            ai_output["issue_clarity"] == "CLEAR"
+            and ai_output["location_quality"] == "ADEQUATE"
+            and ai_output["date_quality"] in ["EXACT", "APPROXIMATE"]
+            and ai_output["time_quality"] in ["EXACT", "APPROXIMATE"]
+        ):
+            return True
+
+        return False
+
+    # Apply rules in the correct order
+    def determine_report_status(self, ai_output):
+
+        # Rule 1: AI_FAILED
+        if not self.validate_ai_output(ai_output):
+            return {
+                "status": "AI_FAILED",
+                "clarification_codes": []
+            }
+
+        clarification_codes = []
+
+        if ai_output["issue_clarity"] == "UNCLEAR":
+            clarification_codes.append("CLARIFY_OBSERVATION")
+
+        if ai_output["location_quality"] == "MISSING":
+            clarification_codes.append("ADD_LOCATION")
+        elif ai_output["location_quality"] == "VAGUE":
+            clarification_codes.append("CLARIFY_LOCATION")
+
+        if ai_output["date_quality"] == "MISSING":
+            clarification_codes.append("ADD_DATE")
+
+        if ai_output["time_quality"] == "MISSING":
+            clarification_codes.append("ADD_TIME")
+
+        # Rule 2: INCOMPLETE
+        if self.check_incomplete(ai_output):
+            status = "INCOMPLETE"
+
+        # Rule 3: NEEDS_CLARIFICATION
+        elif self.check_needs_clarification(ai_output):
+            status = "NEEDS_CLARIFICATION"
+
+        # Rule 4: READY_FOR_REVIEW
+        elif self.check_ready_for_review(ai_output):
+            status = "READY_FOR_REVIEW"
+
+        # For unexpected combinations
+        else:
+            status = "AI_FAILED"
+
+        return {
+            "status": status,
+            "clarification_codes": clarification_codes
+        }
+
+    # Sort reports based on workplace location
+    def sort_reports_by_location(self, reports):
+
+        if not isinstance(reports, list):
+            return []
+
+        location_groups = {}
+
+        for report in reports:
+
+            if not isinstance(report, dict):
+                continue
+
+            case_details = report.get("case_details")
+
+            if not isinstance(case_details, dict):
+                continue
+
+            location = case_details.get("workplace_location")
+
+            if not isinstance(location, str) or not location.strip():
+                continue
+
+            # Standardise spacing and capitalisation
+            location = " ".join(location.split())
+            location_key = location.casefold()
+
+            if location_key not in location_groups:
+                location_groups[location_key] = {
+                    "location": location,
+                    "reports": []
+                }
+
+            group = location_groups[location_key]
+
+            group["reports"].append(report)
+
+        location_summary = []
+
+        for group in location_groups.values():
+
+            location_summary.append({
+                "location": group["location"],
+                "report_count": len(group["reports"]),
+                "reports": group["reports"]
+            })
+
+        # Sort by report count, highest first
+        location_summary.sort(
+            key=lambda item: (
+                -item["report_count"],
+                item["location"].casefold()
+            )
+        )
+
+        return location_summary

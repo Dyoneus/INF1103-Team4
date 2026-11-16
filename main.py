@@ -8,7 +8,7 @@ import ai_manager
 import logic_manager
 import data_manager
 
-MAX_CLARIFICATION_ATTEMPTS = 5 # max clarification reassessments per workflow (if the user keeps giving info and groq keeps returning NEEDS_CLARIFICATION)
+MAX_CLARIFICATION_ATTEMPTS = 5 #max clarification reassessments per workflow (if the user keeps giving info and groq keeps returning NEEDS_CLARIFICATION)
 
 class SafeReportApplication:
     #coordinate application workflows through supplied managers
@@ -47,7 +47,7 @@ class SafeReportApplication:
         #assess a saved report using the supplied managers
 
         try:
-            client = self._ai.get_client()
+            self._ai.ensure_ready()
         except RuntimeError:
             self.handle_ai_failure(reference_id, "CONFIG_MISSING")
             return
@@ -67,7 +67,7 @@ class SafeReportApplication:
 
         try:
             ai_fields = self._ai.analyze_incident(
-                client, incident_data, photo_paths
+                incident_data, photo_paths
             )
         except RuntimeError:
             self.handle_ai_failure(reference_id, "AI_FAILED")
@@ -136,139 +136,114 @@ class SafeReportApplication:
                 assessment.get("clarification_codes", [])
             )
 
+    def process_new_report(self):
+        #collect, save and assess one new report
 
-def handle_ai_failure(reference_id, error_code):
-    #bridges existing workflows to the application during migration
+        report = self._io.collect_report()
 
-    application = SafeReportApplication(
-        io_manager=io_manager,
-        ai_manager=ai_manager,
-        logic_manager=logic_manager,
-        data_manager=data_manager,
-    )
-    return application.handle_ai_failure(reference_id, error_code)
+        if report is None:
+            return
 
+        report = self._io.review_report_before_submission(report)
 
-def process_new_report():
-    #process one safety report through the four managers
+        if report is None:
+            return
 
-    # collect user input
-    report = io_manager.collect_report()
+        try:
+            report_path = self._data.create_report(report)
+        except OSError:
+            self._io.display_processing_error("SAVE_FAILED")
+            return
 
-    if report is None:
-        return
+        reference_id = Path(report_path).stem
+        self._io.display_report_reference(reference_id)
 
-    report = io_manager.review_report_before_submission(report)
-    if report is None:
-        return
-
-    # save the original report
-    try:
-        report_path = data_manager.create_report(report)
-    except OSError:
-        io_manager.display_processing_error("SAVE_FAILED")
-        return
-
-    reference_id = Path(report_path).stem
-    io_manager.display_report_reference(reference_id)
-
-    assessment = assess_report(reference_id, report)
-
-    if assessment is not None:
-        run_clarification_loop(reference_id, report, assessment)
-
-
-def assess_report(reference_id, report):
-    #bridge existing workflows to the application during migration
-    application = SafeReportApplication(
-        io_manager=io_manager,
-        ai_manager=ai_manager,
-        logic_manager=logic_manager,
-        data_manager=data_manager,
-    )
-    return application.assess_report(reference_id, report)
-
-
-def run_clarification_loop(reference_id, report, assessment):
-    #bridge existing workflows to the application during migration
-
-    application = SafeReportApplication(
-        io_manager=io_manager,
-        ai_manager=ai_manager,
-        logic_manager=logic_manager,
-        data_manager=data_manager,
-    )
-    return application.run_clarification_loop(
-        reference_id, report, assessment
-    )
-
-
-def retry_failed_report():
-    #Let the user retry one failed report without creating a duplicate
-    reports = data_manager.get_failed_ai_reports()
-    if reports is None:
-        io_manager.display_processing_error("LOAD_FAILED")
-        return
-    report = io_manager.select_saved_report(reports)
-    if report is not None:
-        reference_id = report["reference_id"]
-
-        assessment = assess_report(reference_id, report)
+        assessment = self.assess_report(reference_id, report)
 
         if assessment is not None:
-            run_clarification_loop(
+            self.run_clarification_loop(
                 reference_id, report, assessment
             )
 
-def clarify_report():
-    #resume clarification for a saved report
+    def retry_failed_report(self):
+        #reassess a selected failed report without creating a duplicate
 
-    reports = data_manager.load_reports()
+        reports = self._data.get_failed_ai_reports()
 
-    if reports is None:
-        io_manager.display_processing_error("LOAD_FAILED")
-        return
-
-    #retrieve reports that require clarification
-    reports = [
-        report for report in reports
-        if isinstance(report.get("assessment"), dict)
-        and report["assessment"].get("status")
-        in ("INCOMPLETE", "NEEDS_CLARIFICATION")
-    ]
-
-    report = io_manager.select_saved_report(reports)
-
-    if report is None:
-        return
-
-    #resume using the existing reference ID and assessment
-    run_clarification_loop(
-        report["reference_id"],
-        report,
-        report["assessment"]
-    )
-
-def run():
-    """Run the SafeReport menu."""
-
-    if data_manager.load_reports() is None:
-        io_manager.display_processing_error("LOAD_FAILED")
-        return
-
-    while True:
-        io_manager.display_menu()
-        choice = io_manager.get_menu_choice()
-
-        if choice == "0":
+        if reports is None:
+            self._io.display_processing_error("LOAD_FAILED")
             return
 
-        if choice == "1":
-            process_new_report()
-        elif choice == "2":
-            retry_failed_report()
-        elif choice == "3":
-            clarify_report()
+        report = self._io.select_saved_report(reports)
+
+        if report is None:
+            return
+
+        reference_id = report["reference_id"]
+        assessment = self.assess_report(reference_id, report)
+
+        if assessment is not None:
+            self.run_clarification_loop(
+                reference_id, report, assessment
+            )
+
+    def clarify_report(self):
+        #select a saved report and resume its clarification
+
+        reports = self._data.load_reports()
+
+        if reports is None:
+            self._io.display_processing_error("LOAD_FAILED")
+            return
+
+        reports = [
+            report for report in reports
+            if isinstance(report.get("assessment"), dict)
+            and report["assessment"].get("status")
+            in ("INCOMPLETE", "NEEDS_CLARIFICATION")
+        ]
+
+        report = self._io.select_saved_report(reports)
+
+        if report is None:
+            return
+
+        self.run_clarification_loop(
+            report["reference_id"],
+            report,
+            report["assessment"],
+        )
+
+    def run(self):
+        #run the console menu using this application's managers
+        if self._data.load_reports() is None:
+            self._io.display_processing_error("LOAD_FAILED")
+            return
+
+        while True:
+            self._io.display_menu()
+            choice = self._io.get_menu_choice()
+
+            if choice == "0":
+                return
+
+            if choice == "1":
+                self.process_new_report()
+            elif choice == "2":
+                self.retry_failed_report()
+            elif choice == "3":
+                self.clarify_report()
+
+def run():
+    #create the managers and start the console application
+
+    application = SafeReportApplication(
+        io_manager=io_manager.IOManager(),
+        ai_manager=ai_manager.AIManager(),
+        logic_manager=logic_manager.LogicManager(),
+        data_manager=data_manager.DataManager(),
+    )
+    return application.run()
 
 
 if __name__ == "__main__":

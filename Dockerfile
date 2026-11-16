@@ -22,4 +22,7 @@ USER app
 # Keep submitted reports/photos and AI results outside the container lifecycle.
 VOLUME ["/app/reports", "/data"]
 
+# Port used by the optional web interface (python web_app.py).
+EXPOSE 5000
+
 CMD ["python", "main.py"]
