@@ -182,7 +182,7 @@ def test_failed_correction_save_keeps_original_and_skips_ai(tmp_path, monkeypatc
     application.clarify_report()
     assert path.read_bytes() == before
     assert not list(tmp_path.glob("*.tmp"))
-
+    assert isolated_database.load_reports()[0]["case_details"]["workplace_location"] == "Warehouse"
 
 def test_clarification_validates_and_collects_datetime_once(monkeypatch):
     report = {"case_details": {}, "assessment": {"clarification_codes": ["ADD_DATE", "ADD_TIME"]}}
