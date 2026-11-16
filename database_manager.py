@@ -2,6 +2,7 @@ import json
 import os
 import sqlite3
 from pathlib import Path
+import logging
 
 class DatabaseManager:
     def __init__(self, database_path=None):
@@ -26,7 +27,7 @@ class DatabaseManager:
             return True
 
         except(sqlite3.Error, OSError) as error:
-            print("Database initialization failed:", error)
+            logging.error("Database initialization failed: %s", error)
             return False
 
 
@@ -43,7 +44,7 @@ class DatabaseManager:
             return True
 
         except(KeyError, TypeError, ValueError, sqlite3.Error) as error:
-            print("Failed to create report:", error)
+            logging.error("Failed to create report: %s", error)
             return False
 
 
@@ -64,7 +65,7 @@ class DatabaseManager:
             return reports
         
         except(sqlite3.Error, json.JSONDecodeError, TypeError) as error:
-            print("Failed to load reports:", error)
+            logging.error("Failed to load reports: %s", error)
             return None
 
 
@@ -99,7 +100,7 @@ class DatabaseManager:
             return True
 
         except (sqlite3.Error, json.JSONDecodeError, TypeError, ValueError) as error:
-            print("Failed to update report:", error)
+            logging.error("Failed to update report: %s", error)
             return False
 
     
@@ -117,7 +118,7 @@ class DatabaseManager:
             return True
 
         except (sqlite3.Error, TypeError, ValueError) as error:
-            print("Failed to delete report:", error)
+            logging.error("Failed to delete report: %s", error)
             return False
 
 
@@ -139,7 +140,7 @@ class DatabaseManager:
             return filtered_reports
 
         except(AttributeError, TypeError) as error:
-            print("Failed to filter reports:", error)
+            logging.error("Failed to filter reports: %s", error)
             return None
 
     
@@ -161,7 +162,7 @@ class DatabaseManager:
             return filtered_reports
 
         except (AttributeError, TypeError) as error:
-            print("Failed to filter reports by location:", error)
+            logging.error("Failed to filter reports by location: %s", error)
             return None
 
 
@@ -188,5 +189,5 @@ class DatabaseManager:
             return True
 
         except (sqlite3.Error, TypeError, ValueError) as error:
-            print("Failed to replace report:", error)
+            logging.error("Failed to replace report: %s", error)
             return False
